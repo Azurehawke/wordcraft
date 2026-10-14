@@ -47,11 +47,19 @@ downloads. Choose WordCraft and **Always** to make it the default.
 A document from a file in your storage opens as that file, and Save writes it in place (with All
 files access). A document that only exists in another app (an email attachment, a Drive file) is
 first saved as a copy in **Documents/WordCraft** (or the app folder, without All files access),
-and that copy is what you edit and save. Opening another document while WordCraft is running asks
-to save changes first, as on the desktop.
+and that copy is what you edit and save. Each document opens in a tab of its own.
 
 ## How it differs from the desktop app
 
+- **Tabs:** each document has a tab along the top, as in PdfCraft. File ▸ New, the **+** at the
+  end of the tabs, File ▸ Open and documents sent from other apps each open in a new tab (Open
+  uses the front tab instead when it is an untouched blank document). A tab's **×**, File ▸
+  Close or Ctrl+W closes that document (asking to save changes first) and leaves the app open;
+  closing the last tab leaves a blank one. Ctrl+Tab and Ctrl+Shift+Tab move between tabs, and
+  a dot after a tab's name marks unsaved changes. Opening a document that is already open brings
+  its tab to the front.
+- **System bars:** the status bar and taskbar take the tab strip's colour, with icons drawn
+  dark or light so they stay readable in the light and dark themes.
 - **Files:** Open, Save As, Export and Insert Picture use WordCraft's built-in file browser, with
   shortcuts to Internal storage, Documents, Download, SD cards and USB drives, and the app folder.
 - **Touch:** a finger tap clicks, a finger drag scrolls the page (it keeps gliding after a

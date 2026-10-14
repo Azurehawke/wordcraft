@@ -18,7 +18,10 @@
 //!   for the on-screen keyboard.
 //! - **Clipboard.** What WordCraft copies goes on the system clipboard, and Ctrl+V pastes what
 //!   other apps copied (`clipboard`).
-//! - **Documents from other apps** open as they arrive (`incoming`).
+//! - **Tabs.** Each document has a tab (an app of its own, as each desktop window is): New and
+//!   Open add a tab, Close removes it, Ctrl+Tab moves between them.
+//! - **System bars** are coloured like the tab strip, with icons that show on that colour.
+//! - **Documents from other apps** open as they arrive (`incoming`), in a tab.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -35,8 +38,19 @@ const SLOP: f32 = 10.0;
 /// A finger held this long (seconds) without moving right-clicks.
 const LONG_PRESS: f64 = 0.5;
 
+/// Height of the tab strip, in points.
+const TAB_STRIP: f32 = 36.0;
+/// Widest a tab gets, and narrowest before tabs stop shrinking.
+const TAB_MAX: f32 = 230.0;
+const TAB_MIN: f32 = 110.0;
+
 pub struct TabletApp {
-    pub app: WordApp,
+    /// One app per open document, each with its own window state (the desktop app is one
+    /// window per document); never empty once a frame has run.
+    tabs: Vec<WordApp>,
+    active: usize,
+    /// New and Open asked for in a tab, opened in tabs of their own next frame.
+    requests: crate::TabRequests,
     android: AndroidApp,
     touches: TouchRouter,
     /// The insets last applied, in points.
@@ -47,18 +61,113 @@ pub struct TabletApp {
     focused: bool,
     /// New builds from the GitHub repository the APK came from (`updater`).
     updater: crate::updater::Updater,
+    /// The system bars' colour last sent to Android.
+    bar_color: Option<egui::Color32>,
 }
 
 impl TabletApp {
-    pub fn new(app: WordApp, android: AndroidApp) -> Self {
+    pub fn new(app: WordApp, requests: crate::TabRequests, android: AndroidApp) -> Self {
         Self {
-            app,
+            tabs: vec![app],
+            active: 0,
+            requests,
             android,
             touches: TouchRouter::default(),
             insets: egui::epaint::MarginF32::default(),
             check_incoming: true,
             focused: true,
             updater: crate::updater::Updater::default(),
+            bar_color: None,
+        }
+    }
+
+    /// The document in front. There is always one: closing the last tab opens a blank one.
+    fn app(&mut self) -> &mut WordApp {
+        if self.tabs.is_empty() {
+            let mut app = crate::new_tab(&self.requests);
+            app.start_screen();
+            self.tabs.push(app);
+        }
+        self.active = self.active.min(self.tabs.len().saturating_sub(1));
+        let i = self.active;
+        // In bounds: `tabs` isn't empty and `i` was just clamped below its length.
+        &mut self.tabs[i]
+    }
+
+    /// Bring tab `i` to the front, with the interface settings of the one it replaces (the
+    /// ribbon tab, theme, language… are one setting for the app, not one per document).
+    fn switch_to(&mut self, i: usize) {
+        if i == self.active || i >= self.tabs.len() {
+            return;
+        }
+        let prefs = self.app().prefs();
+        crate::save_prefs(self.app());
+        self.active = i;
+        let app = self.app();
+        let (backstage, page) = (app.ui.backstage, app.ui.backstage_page.clone());
+        app.apply_prefs(prefs);
+        app.ui.backstage = backstage;
+        app.ui.backstage_page = page;
+        app.canvas.want_focus = true;
+    }
+
+    /// Run New or Open (`id`, `params`) in a tab of its own. Open uses the tab in front instead
+    /// when that is an untouched blank document, as Word reuses its empty Document1.
+    fn open_in_tab(&mut self, id: &str, mut params: serde_json::Value) {
+        if let Some(o) = params.as_object_mut() {
+            o.insert("inPlace".into(), json!(true));
+        }
+        let pristine = {
+            let app = self.app();
+            app.session.path.is_none() && !app.session.dirty
+        };
+        let reuse = id == "file.open" && pristine;
+        let previous = self.active;
+        if !reuse {
+            crate::save_prefs(self.app());
+            self.tabs.push(crate::new_tab(&self.requests));
+            self.active = self.tabs.len() - 1;
+        }
+        let app = self.app();
+        match app.run(id, params) {
+            Ok(_) => {
+                app.ui.backstage = false;
+                app.canvas.want_focus = true;
+            }
+            Err(e) => {
+                let message = format!("Couldn't open the document: {e}");
+                if !reuse {
+                    // Nothing to show in the new tab: back to where we were.
+                    self.tabs.pop();
+                    self.active = previous;
+                }
+                self.app().status(message);
+            }
+        }
+    }
+
+    /// Close the tab at `i`: its Close command asks to save unsaved changes first, and the tab
+    /// goes once the document is closed (`close_finished_tabs`).
+    fn close_tab(&mut self, i: usize) {
+        self.switch_to(i);
+        if let Err(e) = self.app().run("file.close", json!({})) {
+            self.app().status(e);
+        }
+    }
+
+    /// Tabs whose document was closed (File › Close, Ctrl+W, the tab's ×) go away.
+    fn close_finished_tabs(&mut self) {
+        let mut i = 0;
+        while i < self.tabs.len() {
+            let done = self.tabs.get_mut(i).is_some_and(|app| std::mem::take(&mut app.quit_requested));
+            if done {
+                self.tabs.remove(i);
+                if self.active > i || self.active >= self.tabs.len() {
+                    self.active = self.active.saturating_sub(1);
+                }
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -71,25 +180,120 @@ impl TabletApp {
             Some(Incoming::Path(path)) => path,
             Some(Incoming::Bytes { name, bytes }) => match keep_copy(&name, &bytes) {
                 Ok(path) => {
-                    self.app.status(format!("Saved a copy of {name} in {}", path.parent().map_or_else(String::new, |p| p.display().to_string())));
+                    let msg = format!("Saved a copy of {name} in {}", path.parent().map_or_else(String::new, |p| p.display().to_string()));
+                    self.app().status(msg);
                     path.to_string_lossy().into_owned()
                 }
                 Err(e) => {
-                    self.app.status(format!("Couldn't open {name}: {e}"));
+                    self.app().status(format!("Couldn't open {name}: {e}"));
                     return;
                 }
             },
             Some(Incoming::Failed(e)) => {
-                self.app.status(e);
+                self.app().status(e);
                 return;
             }
         };
         log::info!("opening {path}");
-        match self.app.run("file.open", json!({"path": path})) {
-            // Off the start screen, onto the document (or the "Save changes?" question).
-            Ok(_) => self.app.ui.backstage = false,
-            Err(e) => self.app.status(format!("Couldn't open {path}: {e}")),
+        // Already open: bring its tab to the front.
+        if let Some(i) = self.tabs.iter().position(|a| a.session.path.as_deref() == Some(Path::new(&path))) {
+            self.switch_to(i);
+            return;
         }
+        self.open_in_tab("file.open", json!({"path": path}));
+    }
+
+    /// The tab strip along the top: one tab per document (name, a dot for unsaved changes, and
+    /// a close button, always shown since there is no hover on a touch screen), then New.
+    fn tab_strip(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let t = wordcraft_ui_egui::theme::Tokens::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, t.title_bar);
+        painter.hline(rect.x_range(), rect.max.y - 0.5, egui::Stroke::new(1.0, t.border));
+        let plus_w = 40.0;
+        let n = self.tabs.len().max(1) as f32;
+        let w = ((rect.width() - plus_w - 8.0) / n).clamp(TAB_MIN, TAB_MAX);
+        let font = egui::FontId::proportional(13.0);
+        let mut x = rect.min.x + 4.0;
+        let mut switch = None;
+        let mut close = None;
+        for (i, app) in self.tabs.iter().enumerate() {
+            if x + TAB_MIN > rect.max.x - plus_w {
+                // No room: the rest are reached by closing tabs (rare on a tablet's width).
+                break;
+            }
+            let tab = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 4.0), egui::vec2(w - 4.0, rect.height() - 4.0));
+            let active = i == self.active;
+            let resp = ui.interact(tab, ui.id().with(("doc_tab", i)), egui::Sense::click());
+            let fill = if active {
+                t.ribbon
+            } else if resp.hovered() {
+                t.hover
+            } else {
+                t.title_bar
+            };
+            painter.rect_filled(tab, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, fill);
+            let x_btn = egui::Rect::from_center_size(egui::pos2(tab.max.x - 16.0, tab.center().y), egui::vec2(28.0, 28.0));
+            let x_resp = ui.interact(x_btn, ui.id().with(("doc_tab_close", i)), egui::Sense::click());
+            if x_resp.hovered() {
+                painter.rect_filled(x_btn.shrink(3.0), 4.0, t.hover);
+            }
+            let c = x_btn.center();
+            let stroke = egui::Stroke::new(1.4, if active { t.text } else { t.text_dim });
+            painter.line_segment([c + egui::vec2(-4.5, -4.5), c + egui::vec2(4.5, 4.5)], stroke);
+            painter.line_segment([c + egui::vec2(4.5, -4.5), c + egui::vec2(-4.5, 4.5)], stroke);
+            let mut name = app.title_stem();
+            if app.session.dirty {
+                name.push_str(" •");
+            }
+            let text_rect = egui::Rect::from_min_max(egui::pos2(tab.min.x + 10.0, tab.min.y), egui::pos2(x_btn.min.x - 2.0, tab.max.y));
+            painter.with_clip_rect(text_rect).text(
+                egui::pos2(text_rect.min.x, text_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                name,
+                font.clone(),
+                if active { t.text } else { t.text_dim },
+            );
+            if x_resp.clicked() {
+                close = Some(i);
+            } else if resp.clicked() {
+                switch = Some(i);
+            }
+            x += w;
+        }
+        let plus = egui::Rect::from_center_size(egui::pos2(x + plus_w / 2.0, rect.center().y + 2.0), egui::vec2(32.0, 28.0));
+        let plus_resp = ui.interact(plus, ui.id().with("doc_tab_new"), egui::Sense::click()).on_hover_text("New document");
+        if plus_resp.hovered() {
+            painter.rect_filled(plus, 4.0, t.hover);
+        }
+        let c = plus.center();
+        let stroke = egui::Stroke::new(1.6, t.text);
+        painter.line_segment([c + egui::vec2(-6.0, 0.0), c + egui::vec2(6.0, 0.0)], stroke);
+        painter.line_segment([c + egui::vec2(0.0, -6.0), c + egui::vec2(0.0, 6.0)], stroke);
+        if let Some(i) = close {
+            self.close_tab(i);
+        } else if let Some(i) = switch {
+            self.switch_to(i);
+        } else if plus_resp.clicked() {
+            self.open_in_tab("file.new", json!({}));
+        }
+    }
+
+    /// Colour the status bar and taskbar like the tab strip under them, with dark icons on a
+    /// light colour and light ones on a dark colour.
+    fn colour_system_bars(&mut self, color: egui::Color32) {
+        if self.bar_color == Some(color) {
+            return;
+        }
+        self.bar_color = Some(color);
+        let [r, g, b, _] = color.to_array();
+        let argb = i32::from_ne_bytes(u32::from_be_bytes([0xff, r, g, b]).to_ne_bytes());
+        let luminance = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+        let light = luminance > 140.0;
+        let _ = crate::file_access::with_activity("colouring the system bars", |env, activity| {
+            env.call_method(activity, "wcSetSystemBars", "(IZ)V", &[jni::objects::JValue::Int(argb), jni::objects::JValue::Bool(u8::from(light))])?;
+            Ok(())
+        });
     }
 
     /// With a keyboard cover or Bluetooth keyboard attached, typing arrives as key presses, so a
@@ -161,7 +365,7 @@ impl eframe::App for TabletApp {
         }
         if !raw.focused && self.focused {
             // Android may stop a backgrounded app without warning: keep the settings now.
-            crate::save_prefs(&self.app);
+            crate::save_prefs(self.app());
         }
         self.focused = raw.focused;
         self.touches.route(&mut raw.events, raw.time.unwrap_or(0.0));
@@ -170,34 +374,61 @@ impl eframe::App for TabletApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         Self::system_paste(raw);
-        self.app.raw_input_hook(raw);
+        // Ctrl+Tab and Ctrl+Shift+Tab move between tabs.
+        let mut step: i64 = 0;
+        raw.events.retain(|e| match e {
+            Event::Key { key: egui::Key::Tab, pressed, modifiers, .. } if modifiers.ctrl => {
+                if *pressed {
+                    step += if modifiers.shift { -1 } else { 1 };
+                }
+                false
+            }
+            _ => true,
+        });
+        if step != 0 && self.tabs.len() > 1 {
+            let n = self.tabs.len() as i64;
+            let next = (self.active as i64 + step).rem_euclid(n);
+            self.switch_to(usize::try_from(next).unwrap_or(0));
+        }
+        self.app().raw_input_hook(raw);
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if std::mem::take(&mut self.check_incoming) {
             self.open_incoming();
         }
+        // New and Open asked for in a tab last frame open in tabs of their own.
+        let requests = std::mem::take(&mut *self.requests.borrow_mut());
+        for (id, params) in requests {
+            self.open_in_tab(&id, params);
+        }
+        self.close_finished_tabs();
         // At start-up, then at most hourly (`updater`).
         self.updater.maybe_check(ctx.input(|i| i.time));
-        self.app.logic(ctx);
+        self.app().logic(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let full = ui.max_rect();
         let m = self.insets;
-        let inner = egui::Rect::from_min_max(full.min + egui::vec2(m.left, m.top), full.max - egui::vec2(m.right, m.bottom));
-        if inner.width() < 100.0 || inner.height() < 100.0 {
-            self.app.ui(ui);
-        } else {
-            // Behind the status bar: the title bar's colour, so the bar reads as part of the app.
-            let bar = wordcraft_ui_egui::theme::Tokens::get(ui.ctx()).title_bar;
-            ui.painter().rect_filled(full, 0.0, bar);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                ui.set_clip_rect(inner);
-                self.app.ui(ui);
-            });
+        let mut inner = egui::Rect::from_min_max(full.min + egui::vec2(m.left, m.top), full.max - egui::vec2(m.right, m.bottom));
+        if inner.width() < 200.0 || inner.height() < 200.0 {
+            inner = full;
         }
-        self.updater.show(ui.ctx(), if inner.width() < 100.0 || inner.height() < 100.0 { full } else { inner });
+        // Behind the status bar and taskbar: the tab strip's colour, so the bars read as part of
+        // the app, and Android draws their icons dark or light to match.
+        let bar = wordcraft_ui_egui::theme::Tokens::get(ui.ctx()).title_bar;
+        ui.painter().rect_filled(full, 0.0, bar);
+        self.colour_system_bars(bar);
+        let strip = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), TAB_STRIP));
+        let body = egui::Rect::from_min_max(egui::pos2(inner.min.x, strip.max.y), inner.max);
+        self.tab_strip(ui, strip);
+        let app = self.app();
+        ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+            ui.set_clip_rect(body);
+            app.ui(ui);
+        });
+        self.updater.show(ui.ctx(), inner);
         // What WordCraft copied this frame goes on the system clipboard too.
         let copied = ui.ctx().output(|o| {
             o.commands.iter().rev().find_map(|c| match c {
@@ -212,7 +443,7 @@ impl eframe::App for TabletApp {
     }
 
     fn on_exit(&mut self) {
-        crate::save_prefs(&self.app);
+        crate::save_prefs(self.app());
     }
 }
 

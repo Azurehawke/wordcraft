@@ -153,6 +153,12 @@ pub struct Services {
     /// Android: whether the app may read and write shared storage, how to ask for it, and the
     /// storage locations the built-in file browser offers as shortcuts ([`file_browser::StorageAccess`]).
     pub storage: Option<file_browser::StorageAccess>,
+    /// Android: the host keeps documents in tabs. Asked before New and Open (of a given file) run
+    /// here; `true` means the host took the command (it opens the document in a tab of its own)
+    /// and this window's document stays. The host runs the command in a tab with
+    /// `"inPlace": true`, which isn't asked about. Close ends with [`WordApp::quit_requested`] as
+    /// usual, which closes the tab.
+    pub document_tabs: Option<Box<dyn Fn(&str, &Value) -> bool>>,
 }
 
 /// What [`Services::make_default_app`] did.
@@ -601,6 +607,14 @@ impl WordApp {
     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // Documents in tabs (Android): New and Open go to a tab of their own.
+        if (id == "file.new" || (id == "file.open" && params.get("path").is_some()))
+            && params.get("inPlace").is_none()
+            && let Some(tabs) = &self.services.document_tabs
+            && tabs(id, &params)
+        {
+            return Ok(json!({"pending": "tab"}));
+        }
         // A button whose command needs input the user hasn't given yet opens its dialog (#240).
         if let Some(name) = input_dialog(id, &params)
             && widgets::enabled(self, id)

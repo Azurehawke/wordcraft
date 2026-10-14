@@ -8,6 +8,8 @@ import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.Settings;
+import android.view.Window;
+import android.view.WindowInsetsController;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -47,6 +49,27 @@ public class WordCraftActivity extends NativeActivity {
             return;
         }
         setIntent(intent);
+    }
+
+    /**
+     * Colour the status bar and the navigation bar (the taskbar on tablets) `color` (ARGB), with
+     * dark icons when `lightBars` (a light colour) and light icons otherwise.
+     */
+    public void wcSetSystemBars(final int color, final boolean lightBars) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Window w = getWindow();
+                w.setStatusBarColor(color);
+                w.setNavigationBarColor(color);
+                WindowInsetsController c = w.getInsetsController();
+                if (c != null) {
+                    int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                            | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    c.setSystemBarsAppearance(lightBars ? mask : 0, mask);
+                }
+            }
+        });
     }
 
     /** This app's versionCode (the CI build number). */

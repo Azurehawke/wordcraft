@@ -23,7 +23,9 @@ mod incoming;
 mod tablet;
 mod updater;
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use winit::platform::android::activity::AndroidApp;
@@ -72,13 +74,17 @@ pub(crate) fn save_prefs(app: &WordApp) {
     }
 }
 
-/// The custom dictionary (Add to Dictionary) and the fonts the user added, from the settings
-/// folder, as on the desktop.
-fn load_user_files(app: &mut WordApp) {
+/// The custom dictionary (Add to Dictionary) file in the settings folder, as on the desktop.
+fn user_dict_path() -> Option<PathBuf> {
+    wordcraft_control_key::settings_dir().map(|d| d.join(Session::USER_DICT_FILE))
+}
+
+/// The custom dictionary and the fonts the user added, once at start-up.
+fn load_user_files() {
+    if let Some(dict) = user_dict_path() {
+        wordcraft_proof::load_user_dictionary(&dict);
+    }
     let Some(dir) = wordcraft_control_key::settings_dir() else { return };
-    let dict = dir.join(Session::USER_DICT_FILE);
-    wordcraft_proof::load_user_dictionary(&dict);
-    app.session.user_dict_path = Some(dict);
     let (loaded, skipped) = wordcraft_fonts::FontDb::global().load_user_fonts(&dir.join("fonts"));
     if !loaded.is_empty() || !skipped.is_empty() {
         log::info!("user fonts: {} loaded, {} skipped", loaded.len(), skipped.len());
@@ -115,15 +121,39 @@ fn places() -> Vec<(String, PathBuf)> {
     out
 }
 
-/// What the host gives the app on Android.
-fn services() -> Services {
+/// New and Open asked for in a tab, for the host to open in a tab of their own (`tablet`).
+pub(crate) type TabRequests = Rc<RefCell<Vec<(String, serde_json::Value)>>>;
+
+/// What the host gives each tab's app on Android.
+fn services(requests: &TabRequests) -> Services {
+    let requests = Rc::clone(requests);
     Services {
+        document_tabs: Some(Box::new(move |id, params| {
+            requests.borrow_mut().push((id.to_string(), params.clone()));
+            true
+        })),
         builtin_file_browser: true,
         storage: Some(StorageAccess { granted: Box::new(file_access::granted), request: Box::new(file_access::request), places: Box::new(places) }),
         clipboard_text: Some(Box::new(clipboard::text)),
         clipboard_html: Some(Box::new(clipboard::html)),
         ..Default::default()
     }
+}
+
+/// A tab's app on a blank document, with the saved settings.
+pub(crate) fn new_tab(requests: &TabRequests) -> WordApp {
+    let region = wordcraft_ui_egui::i18n::system_region();
+    let mut session = Session::new(wordcraft_engine::blank_document(&region));
+    session.system_region = region;
+    session.user_dict_path = user_dict_path();
+    let mut app = WordApp::new(session, services(requests));
+    load_prefs(&mut app);
+    // A region chosen in File › Options replaces the system's for the blank document.
+    if app.session.prefs.region.is_some() {
+        let doc = app.session.blank_document();
+        app.session.set_document(doc);
+    }
+    app
 }
 
 /// Entry point, called by android-activity on its own thread once the activity is created.
@@ -163,24 +193,16 @@ fn android_main(android: AndroidApp) {
         "WordCraft",
         options,
         Box::new(|cc| {
-            let region = wordcraft_ui_egui::i18n::system_region();
-            let mut session = Session::new(wordcraft_engine::blank_document(&region));
-            session.system_region = region;
-            let mut app = WordApp::new(session, services());
-            load_prefs(&mut app);
-            load_user_files(&mut app);
-            // A region chosen in File › Options replaces the system's for the first blank document.
-            if app.session.prefs.region.is_some() {
-                let doc = app.session.blank_document();
-                app.session.set_document(doc);
-            }
+            load_user_files();
+            let requests = TabRequests::default();
+            let mut app = new_tab(&requests);
             if let Some(state) = &cc.wgpu_render_state {
                 let info = state.adapter.get_info();
                 log::info!("renderer: wgpu on {} ({:?}, {:?})", info.name, info.device_type, info.backend);
             }
             // Start on File › Home, as on the desktop; a document sent by another app opens over it.
             app.start_screen();
-            Ok(Box::new(tablet::TabletApp::new(app, shell_android)))
+            Ok(Box::new(tablet::TabletApp::new(app, requests, shell_android)))
         }),
     );
     if let Err(e) = result {
