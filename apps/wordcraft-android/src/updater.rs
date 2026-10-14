@@ -48,7 +48,7 @@ enum State {
     NeedsPermission(Release),
     Failed(String, Option<Release>),
     /// The user said Later to this build: don't offer it again this run.
-    Dismissed(i64),
+    Dismissed,
 }
 
 pub struct Updater {
@@ -125,7 +125,7 @@ fn plain(e: &str) -> String {
 impl Updater {
     /// Check now if it's time: at start-up, and after [`RECHECK`] when back in front.
     pub fn maybe_check(&mut self, now: f64) {
-        if !matches!(self.state, State::Idle | State::Dismissed(_) | State::Failed(_, None)) {
+        if !matches!(self.state, State::Idle | State::Dismissed | State::Failed(_, None)) {
             return;
         }
         if self.last_check.is_some_and(|t| now - t < RECHECK) {
@@ -182,7 +182,7 @@ impl Updater {
             State::Checking(rx) => match rx.try_recv() {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => self.state = State::Idle,
-                Ok(Ok(Some(r))) if self.dismissed == Some(r.build) => self.state = State::Dismissed(r.build),
+                Ok(Ok(Some(r))) if self.dismissed == Some(r.build) => self.state = State::Dismissed,
                 Ok(Ok(Some(r))) => {
                     log::info!("updates: build {} is available (this is {:?})", r.build, self.current);
                     self.state = State::Available(r);
@@ -233,7 +233,7 @@ impl Updater {
             State::Installing => Card::Installing,
             State::NeedsPermission(r) => Card::NeedsPermission(r.clone()),
             State::Failed(msg, retry) => Card::Failed(msg.clone(), retry.clone()),
-            State::Idle | State::Checking(_) | State::Dismissed(_) => return,
+            State::Idle | State::Checking(_) | State::Dismissed => return,
         };
         let current = self.current.unwrap_or(0);
         let mut action = None;
@@ -255,7 +255,7 @@ impl Updater {
             Some(Action::Install(r)) => self.install(r),
             Some(Action::Dismiss(build)) => {
                 self.dismissed = Some(build);
-                self.state = State::Dismissed(build);
+                self.state = State::Dismissed;
             }
             None => {}
         }
