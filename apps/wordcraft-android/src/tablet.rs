@@ -45,11 +45,21 @@ pub struct TabletApp {
     /// back to the front.
     check_incoming: bool,
     focused: bool,
+    /// New builds from the GitHub repository the APK came from (`updater`).
+    updater: crate::updater::Updater,
 }
 
 impl TabletApp {
     pub fn new(app: WordApp, android: AndroidApp) -> Self {
-        Self { app, android, touches: TouchRouter::default(), insets: egui::epaint::MarginF32::default(), check_incoming: true, focused: true }
+        Self {
+            app,
+            android,
+            touches: TouchRouter::default(),
+            insets: egui::epaint::MarginF32::default(),
+            check_incoming: true,
+            focused: true,
+            updater: crate::updater::Updater::default(),
+        }
     }
 
     /// Open the document another app sent, if there is one. One that only exists in the other
@@ -167,6 +177,8 @@ impl eframe::App for TabletApp {
         if std::mem::take(&mut self.check_incoming) {
             self.open_incoming();
         }
+        // At start-up, then at most hourly (`updater`).
+        self.updater.maybe_check(ctx.input(|i| i.time));
         self.app.logic(ctx);
     }
 
@@ -185,6 +197,7 @@ impl eframe::App for TabletApp {
                 self.app.ui(ui);
             });
         }
+        self.updater.show(ui.ctx(), if inner.width() < 100.0 || inner.height() < 100.0 { full } else { inner });
         // What WordCraft copied this frame goes on the system clipboard too.
         let copied = ui.ctx().output(|o| {
             o.commands.iter().rev().find_map(|c| match c {

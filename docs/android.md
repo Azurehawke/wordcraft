@@ -20,6 +20,24 @@ the one PdfCraft's Android port uses (a NativeActivity APK built without Gradle)
 
 Later builds install over the earlier one as long as they are signed with the same key.
 
+## Updates
+
+WordCraft updates itself from the GitHub repository it was built from. At start-up, and at most
+once an hour after that (when it's open or comes back to the front), it asks GitHub for the
+`android-latest` release. When that is a newer build than the one installed, a card at the bottom
+right offers it:
+
+1. **Update** downloads the APK (about 23 MB) inside the app, with a progress bar.
+2. The first time, Android asks you to allow WordCraft to install apps: turn on **Allow from this
+   source** in the settings that open, come back and tap **Install**.
+3. Android shows its own install window: tap **Update**. WordCraft closes and comes back on the
+   new build, so save your document first.
+
+**Later** hides the card for that build until WordCraft next starts. Being offline is fine: a
+check that fails says nothing and tries again later. Android only installs an update signed with
+the same key as the installed app, so a download that isn't one of this repository's builds is
+refused. Builds before build 2 have no updater: install build 2 or later by hand once.
+
 ## Open documents from other apps
 
 WordCraft appears in **Open with** for Word documents (.docx, .docm, .dotx, .doc), OpenDocument
@@ -51,8 +69,8 @@ to save changes first, as on the desktop.
   formatted (HTML) copies from other apps. Pictures aren't exchanged with other apps.
 - **Saving:** AutoSave works for documents that have been saved once. Android may stop a
   WordCraft that is in the background, so save before switching away from an untitled document.
-- **Not on Android:** printing to a printer (File ▸ Print can still save a PDF), the update
-  check, and the `--control` automation channel.
+- **Not on Android:** printing to a printer (File ▸ Print can still save a PDF) and the
+  `--control` automation channel.
 - Settings, the custom dictionary, added fonts and logs live in the app's private folder;
   uninstalling removes them. Fonts: Android's own (Roboto, Noto) plus WordCraft's bundled ones.
 
@@ -82,8 +100,8 @@ installed app: uninstall the debug-signed one first.
 
 | Part | What it does |
 |---|---|
-| `apps/wordcraft-android` | The `cdylib` Android loads: `android_main`, the host services, `tablet.rs` (insets, touch routing, keyboard, clipboard sync), `file_access.rs`, `incoming.rs`, `clipboard.rs` |
+| `apps/wordcraft-android` | The `cdylib` Android loads: `android_main`, the host services, `tablet.rs` (insets, touch routing, keyboard, clipboard sync), `file_access.rs`, `incoming.rs`, `clipboard.rs`, `updater.rs` (update check and card) |
 | `crates/ui-egui` | Unchanged UI, plus two host options any platform can use: `Services::builtin_file_browser` and `Services::storage` (the access banner and storage shortcuts in the file browser) |
 | `crates/fonts` | Scans `/system/fonts` and `/product/fonts` on Android |
 | `vendor/winit` | winit 0.30.13 with PdfCraft's Android patches (tool type per touch, mouse and touchpad as a mouse); see `vendor/README.md` |
-| `packaging/android` | Manifest, the one-method Java activity, signing key, `build-apk.sh` |
+| `packaging/android` | Manifest, the Java activity (intents, the updater's HTTP and PackageInstaller install), signing key, `build-apk.sh` |

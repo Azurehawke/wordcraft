@@ -11,6 +11,11 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 
+    <!-- Updates (updater.rs): the release listing and APK from GitHub, then installing it, which
+         Android confirms with the user each time. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application

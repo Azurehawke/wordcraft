@@ -7,7 +7,8 @@
 //!   shared storage, which needs "All files access" granted once in Settings (`file_access`).
 //! - Settings, the custom dictionary, added fonts and logs live in the app's internal data folder.
 //! - Touch, S Pen, mouse, system bars and the keyboard cover (`tablet`); the system clipboard
-//!   through JNI (`clipboard`); documents from other apps ("Open with", `incoming`).
+//!   through JNI (`clipboard`); documents from other apps ("Open with", `incoming`); new builds
+//!   from the GitHub repository the APK was built from (`updater`).
 //! - No printing to a printer, no `--control` channel, no system clipboard pictures.
 //!
 //! The approach (NativeActivity, the patched winit, JNI for what Rust can't reach) follows
@@ -20,6 +21,7 @@ mod clipboard;
 mod file_access;
 mod incoming;
 mod tablet;
+mod updater;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
