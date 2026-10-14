@@ -147,6 +147,12 @@ pub struct Services {
     /// `xdg-mime`. `None` (web, macOS) hides the button; macOS shows how to do it in Finder
     /// instead. An error means nothing changed.
     pub make_default_app: Option<Box<dyn Fn() -> Result<DefaultApp, String>>>,
+    /// Android: the host has no system file dialog, so Open, Save As and the other file choices
+    /// go straight to the built-in [`file_browser`] (without the note about a missing portal).
+    pub builtin_file_browser: bool,
+    /// Android: whether the app may read and write shared storage, how to ask for it, and the
+    /// storage locations the built-in file browser offers as shortcuts ([`file_browser::StorageAccess`]).
+    pub storage: Option<file_browser::StorageAccess>,
 }
 
 /// What [`Services::make_default_app`] did.

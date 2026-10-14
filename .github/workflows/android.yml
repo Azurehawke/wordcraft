@@ -1,0 +1,105 @@
+name: Android APK
+
+# Builds WordCraft for Android tablets (arm64) and publishes the APK as the `android-latest`
+# prerelease, which a tablet's browser can download directly. Same recipe as PdfCraft's port.
+on:
+  push:
+    branches: [android]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Faster CI builds than the desktop release profile (no LTO, parallel codegen).
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_PROFILE_RELEASE_STRIP: debuginfo
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-arm64
+
+      # javac for the activity class (packaging/android/java).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Use the runner's NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Signing key from secrets (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks"
+              echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            } >> "$GITHUB_ENV"
+            echo "Signing with the key from secrets"
+          else
+            echo "Signing with packaging/android/debug.keystore"
+          fi
+
+      - name: Build the APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -o pipefail
+          bash packaging/android/build-apk.sh 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # The log, readable without the Actions log viewer: compiler errors as annotations, and the
+      # whole log on the ci-logs branch.
+      - name: Report the build log
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/build.log"
+          [ -f "$log" ] || exit 0
+          grep -E "^error(\[E[0-9]+\])?:" -A12 "$log" | head -c 60000 > "$RUNNER_TEMP/errors.txt" || true
+          grep -E "^error(\[E[0-9]+\])?:" "$log" | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
+          dir=$(mktemp -d)
+          cp "$log" "$RUNNER_TEMP/errors.txt" "$dir/"
+          cd "$dir" && git init -q -b ci-logs && git add -A \
+            && git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -qm "Android build ${{ github.run_number }} (${GITHUB_SHA::7}): ${{ job.status }}" \
+            && git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordcraft-android
+          path: target/android-apk/wordcraft.apk
+
+      - name: Publish as the android-latest prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest target/android-apk/wordcraft.apk \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "WordCraft for Android (build ${{ github.run_number }})" \
+            --notes "Built from ${GITHUB_SHA::7} on the android branch. Install wordcraft.apk on the tablet; see docs/android.md."

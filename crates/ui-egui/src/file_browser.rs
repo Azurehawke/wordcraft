@@ -15,6 +15,21 @@ use crate::file_dialogs::{AfterPick, FileDialogRequest, open_filters};
 use crate::theme::{APP_COLOR, Tokens, regular};
 use crate::{WordApp, icons};
 
+/// A host's say over shared storage (Android, [`Services::storage`](crate::Services::storage)):
+/// apps there may only list the user's folders once "All files access" is turned on in Settings,
+/// which the app can open but not switch on itself. The browser says so above the listing, with a
+/// button that opens the setting, and lists the folder again once access is given.
+pub struct StorageAccess {
+    /// Whether the app may read and write shared storage now. Asked every frame while the browser
+    /// is open (cheap), so turning the setting on shows at once.
+    pub granted: Box<dyn Fn() -> bool>,
+    /// Open the system setting where the user gives access; an error says why it didn't open.
+    pub request: Box<dyn Fn() -> Result<(), String>>,
+    /// Places offered as one-tap shortcuts above the listing: (label, folder), such as the
+    /// device's storage, Documents, Download, and SD cards or USB drives that are plugged in.
+    pub places: Box<dyn Fn() -> Vec<(String, PathBuf)>>,
+}
+
 /// At most this many entries are listed; a bigger folder shows the first ones and says so.
 const MAX_LISTED: usize = 5000;
 /// At most this many folder entries are read, so a huge folder can't stall the window.
@@ -142,6 +157,11 @@ pub(crate) struct FileBrowser {
     selected: Option<PathBuf>,
     note: Note,
     focus_name: bool,
+    /// Whether shared storage was accessible last frame ([`StorageAccess`]); `None` before the
+    /// first check or when the host doesn't say.
+    granted: Option<bool>,
+    /// Why the storage setting couldn't be opened, if it couldn't.
+    access_error: Option<String>,
 }
 
 impl FileBrowser {
@@ -170,6 +190,8 @@ impl FileBrowser {
             selected: None,
             note: Note::None,
             focus_name: true,
+            granted: None,
+            access_error: None,
         };
         b.navigate(start);
         b
@@ -312,7 +334,7 @@ pub(crate) fn show(app: &mut WordApp, ctx: &egui::Context) {
         .open(&mut open)
         .show(ctx, |ui| {
             ui.set_width(620.0);
-            done = body(ui, &mut b, &t);
+            done = body(ui, &mut b, &t, app.services.storage.as_ref());
         });
     if !open {
         done = Some(None);
@@ -324,7 +346,10 @@ pub(crate) fn show(app: &mut WordApp, ctx: &egui::Context) {
 }
 
 /// The browser's contents; `Some` once it closes (`Some(None)`: cancelled).
-fn body(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens) -> Option<Option<PathBuf>> {
+fn body(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens, storage: Option<&StorageAccess>) -> Option<Option<PathBuf>> {
+    if let Some(storage) = storage {
+        storage_bar(ui, b, t, storage);
+    }
     if b.unavailable {
         ui.label(
             egui::RichText::new(tl!(
@@ -453,6 +478,49 @@ fn body(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens) -> Option<Option<PathBuf>>
         return Some(Some(path));
     }
     None
+}
+
+/// Above the listing, for a host with a say over shared storage: a request for access while it
+/// isn't given, and shortcuts to the storage places.
+fn storage_bar(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens, storage: &StorageAccess) {
+    let granted = (storage.granted)();
+    if b.granted == Some(false) && granted {
+        // Access was just turned on (in Settings): what couldn't be read before can be now.
+        b.access_error = None;
+        b.navigate(b.dir.clone());
+    }
+    b.granted = Some(granted);
+    if !granted {
+        egui::Frame::NONE.fill(t.hover).inner_margin(8.0).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new(tl!(
+                "To open and save documents in your folders, allow WordCraft to manage all files. Without it, WordCraft can only use its own app folder."
+            )).color(t.text));
+            ui.add_space(4.0);
+            if ui.add(egui::Button::new(egui::RichText::new(tl!("Allow access…")).color(egui::Color32::WHITE)).fill(APP_COLOR)).clicked() {
+                b.access_error = (storage.request)().err();
+            }
+            if let Some(e) = &b.access_error {
+                ui.label(egui::RichText::new(crate::i18n::fmt(
+                    tl!("Settings didn't open ({error}). Turn it on in Settings › Apps › Special access › All files access › WordCraft."),
+                    &[("error", e)],
+                )).color(t.red));
+            }
+        });
+        ui.add_space(6.0);
+    }
+    let places = (storage.places)();
+    if !places.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            for (label, dir) in places {
+                let here = b.dir == dir;
+                if ui.selectable_label(here, label.as_str()).clicked() {
+                    b.navigate(dir);
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
 }
 
 /// A small button with a drawn icon and a tooltip; true when clicked.

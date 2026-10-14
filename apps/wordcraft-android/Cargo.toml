@@ -1,0 +1,44 @@
+[package]
+name = "wordcraft-android"
+description = "WordCraft on Android tablets (NativeActivity; build with packaging/android/build-apk.sh)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# Loaded by Android's NativeActivity as libwordcraft_android.so.
+crate-type = ["cdylib"]
+
+# Not the workspace lints: `unsafe_code = "forbid"` can't be relaxed per item, and Android needs a
+# few unsafe-attributed items here (the exported `android_main`, `set_var` before any thread
+# starts, and wrapping the JavaVM and activity pointers Android hands over). Everything else in
+# the crate stays safe.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[target.'cfg(target_os = "android")'.dependencies]
+wordcraft-doc = { workspace = true }
+wordcraft-engine = { workspace = true }
+wordcraft-fonts = { workspace = true }
+wordcraft-proof = { workspace = true }
+wordcraft-ui-egui = { workspace = true }
+wordcraft-control-key = { workspace = true }
+# No accesskit: eframe only offers it on Android with GameActivity, which needs Java and Gradle;
+# WordCraft uses NativeActivity there (as PdfCraft does).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "android-native-activity"] }
+egui = { workspace = true }
+# The AndroidApp handle (resolves to vendor/winit, like eframe's own).
+winit = { version = "0.30", default-features = false, features = ["android-native-activity"] }
+serde_json = { workspace = true }
+log = { workspace = true }
+android_logger = "0.15"
+# All files access, documents sent by other apps, and the system clipboard, through JNI.
+jni = "0.21"
+ndk-context = "0.1"
+# Whether a hardware keyboard is attached (tablet.rs; already in the build through android-activity).
+ndk = { version = "0.9", default-features = false }

@@ -124,6 +124,12 @@ impl WordApp {
             self.status(tl!("A file dialog is already open."));
             return Asked::Busy;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.services.builtin_file_browser {
+            // A host without system dialogs (Android): the built-in browser finishes the job later.
+            self.show_file_browser(req, after, false);
+            return Asked::Pending;
+        }
         if let Some(show) = &self.services.file_dialog {
             let rx = show(req.clone());
             self.file_dialog = Some(PendingDialog { rx, req, after });

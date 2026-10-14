@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+exclude = ["vendor"]
 default-members = ["crates/*", "apps/wordcraft", "apps/wordcraft-cli", "xtask"]
 
 [workspace.package]
@@ -95,3 +96,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = 0
+
+# Vendored, patched third-party crates (see vendor/README.md).
+[patch.crates-io]
+# Android: each touch carries its tool (finger, S Pen, eraser, mouse, palm) and a paired mouse or
+# touchpad works as a mouse (apps/wordcraft-android). From PdfCraft's Android port.
+winit = { path = "vendor/winit" }
