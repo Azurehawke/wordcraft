@@ -275,10 +275,15 @@ fn ribbon_page(app: &mut WordApp, ui: &mut Ui, f: &mut RibbonForm, h: f32) {
                 ui.label(tl!("Name:"));
                 let r = ui.add(egui::TextEdit::singleline(name).desired_width(140.0));
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                // macOS puts Cancel before OK.
+                let mac = cfg!(target_os = "macos");
+                if mac && ui.button(tl!("Cancel")).clicked() {
+                    done = Some(None);
+                }
                 if ui.button(tl!("OK")).clicked() || enter {
                     done = Some(Some(name.clone()));
                 }
-                if ui.button(tl!("Cancel")).clicked() {
+                if !mac && ui.button(tl!("Cancel")).clicked() {
                     done = Some(None);
                 }
             });
@@ -405,8 +410,7 @@ mod tests {
         assert_eq!(b.session.ribbon.qat(), ["file.save", "edit.undo", "edit.redo", "format.bold"]);
 
         let mut c = app();
-        c.apply_prefs(serde_json::from_str(r#"{"tab": "Insert", "ribbon": {"tabs": 3, "qat": ["gone.command", "edit.undo"]}}"#).unwrap());
-        assert_eq!(c.ui.tab, "Insert");
+        c.apply_prefs(serde_json::from_str(r#"{"ribbon": {"tabs": 3, "qat": ["gone.command", "edit.undo"]}}"#).unwrap());
         assert!(c.session.ribbon.ribbon_is_default());
         assert_eq!(c.session.ribbon.qat(), ["edit.undo"]);
     }

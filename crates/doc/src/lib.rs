@@ -24,6 +24,7 @@ pub mod eq;
 pub mod fields;
 pub mod freeform;
 pub mod graphic;
+pub mod line_dash;
 pub mod link;
 pub mod locale_number;
 pub mod math;
@@ -70,6 +71,27 @@ pub enum DocError {
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;
+
+/// A free id, `min` or more, for something new (a part, a list, a comment): one past `largest`, the
+/// largest id in use, so ids keep growing; once that would pass `u32::MAX` (a file can use any id),
+/// the lowest one `used` (every id in use) doesn't hold. `None` when every id from `min` up is taken.
+pub fn free_id(largest: Option<u32>, used: impl Iterator<Item = u32>, min: u32) -> Option<u32> {
+    let Some(largest) = largest else { return Some(min) };
+    if let Some(next) = largest.checked_add(1) {
+        return Some(next.max(min));
+    }
+    let mut ids: Vec<u32> = used.filter(|&i| i >= min).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut want = min;
+    for i in ids {
+        if i > want {
+            break;
+        }
+        want = want.checked_add(1)?;
+    }
+    Some(want)
+}
 
 /// A block in a story. (Blocks are always behind an `Arc`, so the size difference is fine.)
 #[allow(clippy::large_enum_variant)]
@@ -283,11 +305,17 @@ pub struct TextBody {
     /// story; its own blocks are unused. See [`Document::text_box_chains`].
     pub next: Option<u32>,
     /// Internal margins (left, top, right, bottom), EMU, when the file gives its own
-    /// (`wps:bodyPr` `lIns`… ECMA-376 Part 1 §21.1.2.1.1); `None` is Word's defaults.
+    /// (`wps:bodyPr` `lIns`… ECMA-376 Part 1 §21.1.2.1.1, or VML `v:textbox` `inset`);
+    /// `None` is Word's defaults.
     pub inset: Option<[u32; 4]>,
-    /// Resize shape to fit text (`a:spAutoFit`): Word grows the box to its text, so none of
-    /// the text is cut.
+    /// Resize shape to fit text (`a:spAutoFit`, VML `mso-fit-shape-to-text`): Word grows the
+    /// box to its text, so none of the text is cut.
     pub auto_fit: bool,
+    /// The colour the shape's style gives its text (`wps:style/a:fontRef`): what automatic text
+    /// colour means inside this box, instead of black. Text whose colour comes from its runs,
+    /// styles or the document defaults keeps it (Word, observed with synthetic documents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_color: Option<props::Rgb>,
 }
 
 /// Word's default text box margins (left, top, right, bottom), EMU: 0.1" and 0.05".
@@ -321,6 +349,13 @@ pub struct Comment {
     pub resolved: bool,
     /// `Document::parts` id of the comment text.
     pub part: u32,
+    /// Word's durable id for the comment (`w16cid:durableId`, hex), kept across saves so Word
+    /// keeps tracking the same comment. `None` for comments made here: the writer assigns one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_id: Option<String>,
+    /// The comment's UTC timestamp from the file (`w16cex:dateUtc`); `date` is local time there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_utc: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -357,6 +392,40 @@ impl Document {
         idx.and_then(|i| self.revisions.get(i as usize)).and_then(|r| r.move_name.as_deref())
     }
 }
+
+/// A building block (Insert › Quick Parts, AutoText…) kept in the document's glossary
+/// (ECMA-376 §17.12: `w:docPart`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BuildingBlock {
+    /// The entry's name (`w:docPartPr/w:name`).
+    pub name: String,
+    /// Its gallery (`w:category/w:gallery`: `docParts` for Quick Parts, `autoTxt` for AutoText…).
+    pub gallery: String,
+    /// Its category within the gallery (`w:category/w:name`, e.g. "General").
+    pub category: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The entry's identity (`w:guid`), kept as read.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub guid: String,
+    /// The paragraph style it's associated with (`w:style`), kept as read.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub style: String,
+    /// Its types (`w:types/w:type`: `normal`, `bbPlcHdr` for a content control's placeholder…).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// How it's inserted (`w:behaviors/w:behavior`: `content`, `p`, `pg`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub behaviors: Vec<String>,
+    /// The content (`w:docPartBody`).
+    pub blocks: Blocks,
+}
+
+/// The gallery Quick Parts saves to (`w:gallery w:val="docParts"`).
+pub const QUICK_PARTS_GALLERY: &str = "docParts";
+/// The AutoText gallery (`w:gallery w:val="autoTxt"`).
+pub const AUTO_TEXT_GALLERY: &str = "autoTxt";
 
 /// A bibliography source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -419,6 +488,10 @@ pub struct CoreProps {
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub track_changes: bool,
+    /// Record a tracked cut and paste of a sentence or paragraph as a move (Track moves); off
+    /// when the file has `w:doNotTrackMoves` (ECMA-376 §17.15.1.29), and then it is an
+    /// ordinary deletion and insertion.
+    pub track_moves: bool,
     /// Default tab stop interval, points.
     pub default_tab: f32,
     pub even_odd_headers: bool,
@@ -432,6 +505,8 @@ pub struct Settings {
     /// Most consecutive lines that may end with a hyphen (`w:consecutiveHyphenLimit`); 0 = no limit.
     pub consecutive_hyphen_limit: u32,
     pub page_color: Option<Rgb>,
+    /// Picture or texture page background (Design › Page Color › Fill Effects), drawn over the colour.
+    pub page_picture: Option<PagePicture>,
     pub watermark: Option<Watermark>,
     /// Theme fonts (major = headings, minor = body).
     pub major_font: String,
@@ -463,6 +538,17 @@ pub struct Settings {
     /// 2013 and later, which places a table's border at the margin rather than its text and lets
     /// justified lines shrink their spaces to fit more text.
     pub compat_mode: u32,
+    /// Fonts the document's font table classes as roman (serif, `w:family w:val="roman"`): Word
+    /// draws one that isn't installed in a serif face.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roman_fonts: Vec<String>,
+    /// `w:doNotUseHTMLParagraphAutoSpacing`: the space between two paragraphs is the first's space
+    /// after plus the second's space before, not the larger of the two.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sum_paragraph_spacing: bool,
+    /// Keep contextual paragraph spacing inside legacy table cells (`allowSpaceOfSameStyleInTable`).
+    /// Word ignores the layout override in compatibility mode 15, but the flag still round-trips.
+    pub allow_space_of_same_style_in_table: bool,
     /// Drawing grid spacing in points, across and down (View › Gridlines); ECMA-376's default is 1/8 inch.
     pub grid_h: f32,
     pub grid_v: f32,
@@ -479,6 +565,37 @@ pub struct Settings {
     pub attached_template: Option<String>,
     /// Update the document's styles from the attached template when it is opened (`w:linkStyles`).
     pub link_styles: bool,
+    /// The zoom the document was saved at (`w:zoom`), restored when it is opened; `None` for 100%
+    /// without a fit mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<Zoom>,
+    /// Remove personal information when saving (`w:removePersonalInformation`, ECMA-376
+    /// §17.15.1.70): the saved file names comment and revision authors "Author" and leaves out
+    /// the document's creator and last-modified-by. The open document keeps its real values.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remove_personal_info: bool,
+    /// Remove date and time from annotations when saving (`w:removeDateAndTime`, §17.15.1.69):
+    /// comments and tracked changes are saved without `w:date`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remove_date_time: bool,
+}
+
+/// A saved zoom: a percentage, or a fit mode (the percentage it last came to).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Zoom {
+    /// 10–500.
+    pub percent: u32,
+    pub fit: Option<ZoomFit>,
+}
+
+/// View › Zoom's fit modes a document can be saved in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ZoomFit {
+    OnePage,
+    PageWidth,
+    TextWidth,
 }
 
 /// Word's compatibility mode for documents that don't state one.
@@ -492,6 +609,18 @@ pub const DEFAULT_HYPHENATION_ZONE: f32 = 18.0;
 
 /// ECMA-376 §17.15.1.44/45: 180 twentieths of a point when a document doesn't say.
 pub const DEFAULT_GRID: f32 = 9.0;
+
+/// A picture fill for the page background (`v:background/v:fill` with an image).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PagePicture {
+    /// Key into [`Document::media`].
+    pub media: String,
+    /// `v:fill/@type` (`tile`, `frame`, `tile`...); tiled when `tile`, stretched to the page otherwise.
+    pub fill_type: String,
+    /// `o:title` of the fill (texture name), kept for round trip.
+    pub title: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -529,6 +658,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             track_changes: false,
+            track_moves: true,
             default_tab: 36.0,
             even_odd_headers: false,
             mirror_margins: false,
@@ -537,6 +667,7 @@ impl Default for Settings {
             hyphenate_caps: true,
             consecutive_hyphen_limit: 0,
             page_color: None,
+            page_picture: None,
             watermark: None,
             major_font: styles::HEADING_FONT.into(),
             minor_font: styles::BODY_FONT.into(),
@@ -550,12 +681,18 @@ impl Default for Settings {
             protect_formatting: false,
             protect_hash: Vec::new(),
             compat_mode: COMPAT_MODE_CURRENT,
+            roman_fonts: Vec::new(),
+            sum_paragraph_spacing: false,
+            allow_space_of_same_style_in_table: false,
             grid_h: DEFAULT_GRID,
             grid_v: DEFAULT_GRID,
             math: None,
             bib_style: None,
             attached_template: None,
             link_styles: false,
+            zoom: None,
+            remove_personal_info: false,
+            remove_date_time: false,
         }
     }
 }
@@ -585,11 +722,14 @@ pub struct Document {
     #[serde(skip_serializing_if = "NoteSeparators::is_empty")]
     pub endnote_separators: NoteSeparators,
     /// Embedded media (images) by key.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub media: BTreeMap<String, Arc<Vec<u8>>>,
     /// Source-format parts we keep verbatim for round-trip (e.g. custom XML), by part name.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub passthrough: BTreeMap<String, Arc<Vec<u8>>>,
+    /// The document's own building blocks (its glossary document), in file order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<BuildingBlock>,
 }
 
 impl Default for Document {
@@ -617,6 +757,7 @@ impl Document {
             endnote_separators: NoteSeparators::default(),
             media: BTreeMap::new(),
             passthrough: BTreeMap::new(),
+            glossary: Vec::new(),
         }
     }
 
@@ -802,19 +943,24 @@ impl Document {
 
     /// The whole text of a story, paragraphs separated by `\n` (tables: cells by `\t`).
     pub fn plain_text(&self, s: StoryRef) -> String {
-        self.story_text(s, false)
+        self.story_text(s, TextMode::Plain)
     }
 
     /// [`Self::plain_text`] as it reads on screen: symbol-font characters (Wingdings…) as their
     /// Unicode equivalents ([`Paragraph::shown_text`]).
     pub fn shown_text(&self, s: StoryRef) -> String {
-        self.story_text(s, true)
+        self.story_text(s, TextMode::Shown)
     }
 
-    fn story_text(&self, s: StoryRef, shown: bool) -> String {
+    /// [`Self::plain_text`] without tracked-deleted runs. A deleted paragraph mark still yields `\n`.
+    pub fn final_text(&self, s: StoryRef) -> String {
+        self.story_text(s, TextMode::Final)
+    }
+
+    fn story_text(&self, s: StoryRef, mode: TextMode) -> String {
         let mut out = String::new();
         if let Some(bl) = self.story(s) {
-            text_of(bl, &mut out, 0, shown);
+            text_of(bl, &mut out, 0, mode);
         }
         if out.ends_with('\n') {
             out.pop();
@@ -881,15 +1027,34 @@ impl Document {
         &mut self.last_section
     }
 
-    /// Allocate a new part id and insert the part.
+    /// Remove the section break on the mark of top-level body paragraph `block`: its section
+    /// joins the following one ([`SectionProps::absorb`]). False when there is no break there.
+    pub fn remove_section_break(&mut self, block: usize) -> bool {
+        if !matches!(self.body.get(block).map(|b| &**b), Some(Block::Para(p)) if p.section.is_some()) {
+            return false;
+        }
+        let Some(Block::Para(p)) = self.body.get_mut(block).map(Arc::make_mut) else { return false };
+        let Some(before) = p.section.take() else { return false };
+        self.section_mut(block).absorb(&before);
+        true
+    }
+
+    /// Allocate a new part id and insert the part. Part ids run out only past `u32::MAX` parts, more
+    /// than memory holds; then nothing is added and the id is 0, which [`free_id`] never gives a part.
     pub fn add_part(&mut self, kind: PartKind, blocks: Blocks) -> u32 {
-        let id = self.parts.keys().next_back().map(|k| k + 1).unwrap_or(1);
+        self.try_add_part(kind, blocks).unwrap_or(0)
+    }
+
+    /// [`Document::add_part`], or an error, adding nothing, when every part id is taken.
+    pub fn try_add_part(&mut self, kind: PartKind, blocks: Blocks) -> Result<u32> {
+        let id = free_id(self.parts.keys().next_back().copied(), self.parts.keys().copied(), 1)
+            .ok_or_else(|| DocError::Invalid("no free part id".into()))?;
         let mut part = Part { kind, blocks, body: TextBody::default() };
         if part.blocks.is_empty() {
             part.blocks.push(para_block(Paragraph::new()));
         }
         self.parts.insert(id, part);
-        id
+        Ok(id)
     }
 
     /// Count words like Word's status bar (whitespace-separated tokens containing a letter or digit,
@@ -1146,6 +1311,18 @@ impl Document {
         }
     }
 
+    /// Repair every paragraph's runs (see [`Paragraph::normalize`]); for models from untrusted
+    /// JSON, whose run lengths may overflow, fall short or split a character.
+    pub fn normalize_runs(&mut self) {
+        let mut stories: Vec<&mut Blocks> = vec![&mut self.body];
+        stories.extend(self.parts.values_mut().map(|p| &mut p.blocks));
+        for blocks in stories {
+            for b in blocks.iter_mut() {
+                edit::each_para_mut(Arc::make_mut(b), 0, &mut Paragraph::normalize);
+            }
+        }
+    }
+
     /// Number of paragraphs in the body (all depths).
     pub fn paragraph_count(&self) -> usize {
         self.para_paths(StoryRef::Body).len()
@@ -1271,8 +1448,11 @@ pub fn count_words(s: &str) -> usize {
     s.split(|c: char| c.is_whitespace() || c == para::OBJ).filter(|w| w.chars().any(char::is_alphanumeric)).count()
 }
 
+/// How deep in nested tables [`Document::para_paths`] goes: cells below this are skipped.
+pub(crate) const PARA_WALK_DEPTH: usize = 16;
+
 fn walk(bl: &Blocks, prefix: &mut Vec<u32>, out: &mut Vec<Path>, depth: usize) {
-    if depth > 16 {
+    if depth > PARA_WALK_DEPTH {
         return;
     }
     for (i, b) in bl.iter().enumerate() {
@@ -1295,14 +1475,29 @@ fn walk(bl: &Blocks, prefix: &mut Vec<u32>, out: &mut Vec<Path>, depth: usize) {
     }
 }
 
-fn text_of(bl: &Blocks, out: &mut String, depth: usize, shown: bool) {
+/// Which text of a paragraph [`text_of`] collects.
+#[derive(Clone, Copy)]
+enum TextMode {
+    /// Every run, tracked deletions included ([`Paragraph::plain_text`]).
+    Plain,
+    /// As shown on screen ([`Paragraph::shown_text`]).
+    Shown,
+    /// Without tracked deletions ([`Paragraph::final_text`]).
+    Final,
+}
+
+fn text_of(bl: &Blocks, out: &mut String, depth: usize, mode: TextMode) {
     if depth > 16 {
         return;
     }
     for b in bl {
         match &**b {
             Block::Para(p) => {
-                out.push_str(&if shown { p.shown_text() } else { p.plain_text() });
+                out.push_str(&match mode {
+                    TextMode::Plain => p.plain_text(),
+                    TextMode::Shown => p.shown_text(),
+                    TextMode::Final => p.final_text(),
+                });
                 out.push('\n');
             }
             Block::Table(t) => {
@@ -1310,7 +1505,7 @@ fn text_of(bl: &Blocks, out: &mut String, depth: usize, shown: bool) {
                     let mut cells = Vec::new();
                     for c in &row.cells {
                         let mut s = String::new();
-                        text_of(&c.blocks, &mut s, depth + 1, shown);
+                        text_of(&c.blocks, &mut s, depth + 1, mode);
                         cells.push(s.trim_end_matches('\n').replace('\n', " "));
                     }
                     out.push_str(&cells.join("\t"));

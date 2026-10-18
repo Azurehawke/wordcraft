@@ -84,10 +84,11 @@ pub(crate) fn buttons(ui: &mut Ui, ok: &str, cancel: &str, ok_enabled: bool) -> 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(tl!(cancel)).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            let (okb, cancelb) =
+                crate::dialogs::ok_cancel_responses(ui, |ui| ui.add_enabled(ok_enabled, crate::widgets::primary_button(ui, tl!(ok))), tl!(cancel));
+            if cancelb.clicked() || crate::dialogs::cancel_key_pressed(ui) {
                 r.1 = true;
             }
-            let okb = ui.add_enabled(ok_enabled, crate::widgets::primary_button(ui, tl!(ok)));
             if okb.clicked() || (ok_enabled && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                 r.0 = true;
             }
@@ -112,12 +113,14 @@ pub struct ColumnsForm {
     pub cols: Vec<(f32, f32)>,
     /// Line between columns.
     pub separator: bool,
-    /// `section`, `document` or `forward` (this point forward).
+    /// `section`, `document`, `forward` (this point forward) or `selection` (selected text).
     pub apply: String,
     /// The section's text width, in the interface unit.
     pub text_width: f32,
     /// The document has more than one section (offer "This section").
     pub sections: bool,
+    /// Text is selected that can take columns of its own (offer "Selected text", #2024).
+    pub selection: bool,
 }
 
 impl ColumnsForm {
@@ -131,14 +134,21 @@ impl ColumnsForm {
         let c = &sp.columns;
         let count = c.count.clamp(1, 12);
         let sections = app.session.doc.sections().len() > 1;
+        let selection = wordcraft_engine::cmd::page::selection_sectionable(&app.session);
+        let apply = match (selection, sections) {
+            (true, _) => "selection",
+            (false, true) => "section",
+            (false, false) => "document",
+        };
         let mut f = ColumnsForm {
             count,
             equal: true,
             cols: Vec::new(),
             separator: c.separator,
-            apply: if sections { "section" } else { "document" }.into(),
+            apply: apply.into(),
             text_width: sp.text_width() / k,
             sections,
+            selection,
         };
         if c.widths.len() == count as usize && count > 1 {
             f.equal = false;
@@ -437,6 +447,9 @@ fn columns_ui(app: &mut WordApp, ui: &mut Ui, f: &mut ColumnsForm) -> bool {
         let mut options = vec![("document", "Whole document"), ("forward", "This point forward")];
         if f.sections {
             options.insert(0, ("section", "This section"));
+        }
+        if f.selection {
+            options.push(("selection", "Selected text"));
         }
         let shown = options.iter().find(|(k, _)| *k == f.apply).map(|(_, l)| *l).unwrap_or("This section");
         egui::ComboBox::from_id_salt("columns_apply").selected_text(tl!(shown)).width(180.0).show_ui(ui, |ui| {
@@ -923,6 +936,8 @@ pub enum FieldKind {
     Sequence,
     Merge,
     Toc,
+    /// STYLEREF: a style and its search and number switches.
+    Style,
     Plain,
 }
 
@@ -944,8 +959,19 @@ pub const FIELDS: &[(&str, &str, &str)] = &[
     ("SEQ", "Numbering", "A numbered sequence (figures, tables…)"),
     ("PAGEREF", "Links and References", "Page on which a bookmarked passage falls"),
     ("REF", "Links and References", "Copy of the text a bookmark marks"),
+    ("STYLEREF", "Links and References", "Text of the nearest paragraph with a given style (running headers)"),
     ("TOC", "Index and Tables", "A table of contents"),
     ("MERGEFIELD", "Mail Merge", "A mail merge field"),
+];
+
+/// STYLEREF's options (ECMA-376 §17.16.5.59): switch letter and label.
+pub const STYLEREF_SWITCHES: &[(char, &str)] = &[
+    ('l', "Take the last match on the page"),
+    ('n', "Show its list number"),
+    ('r', "Show its number relative to this field"),
+    ('w', "Show its number with all higher levels"),
+    ('t', "Number only, without the label's words"),
+    ('p', "Add whether it is above or below"),
 ];
 
 /// The categories, in list order ("(All)" first).
@@ -993,6 +1019,7 @@ pub fn field_kind(name: &str) -> FieldKind {
         "SEQ" => FieldKind::Sequence,
         "MERGEFIELD" => FieldKind::Merge,
         "TOC" => FieldKind::Toc,
+        "STYLEREF" => FieldKind::Style,
         _ => FieldKind::Plain,
     }
 }
@@ -1008,8 +1035,13 @@ pub struct FieldForm {
     pub date_format: String,
     /// `\*` value for number fields (empty = none).
     pub number_format: String,
-    /// Bookmark (REF, PAGEREF), sequence name (SEQ) or merge field (MERGEFIELD).
+    /// Bookmark (REF, PAGEREF), sequence name (SEQ), merge field (MERGEFIELD) or style name
+    /// (STYLEREF).
     pub target: String,
+    /// STYLEREF switches, as their letters (`l` search from the bottom of the page, `n`
+    /// paragraph number, `r` relative context, `w` full context, `t` suppress non-numbers,
+    /// `p` above/below).
+    pub style_switches: String,
     /// Keep the formatting applied to the result when it updates (`\* MERGEFORMAT`).
     pub preserve: bool,
     /// Field Codes: type the code directly.
@@ -1019,6 +1051,9 @@ pub struct FieldForm {
     bookmarks: Vec<String>,
     #[serde(skip)]
     merge_fields: Vec<String>,
+    /// Paragraph and character style names, for STYLEREF.
+    #[serde(skip)]
+    styles: Vec<String>,
 }
 
 impl FieldForm {
@@ -1037,6 +1072,21 @@ impl FieldForm {
             code: String::new(),
             bookmarks,
             merge_fields: app.session.merge.headers.clone(),
+            style_switches: String::new(),
+            styles: {
+                let mut v: Vec<String> = app
+                    .session
+                    .doc
+                    .styles
+                    .styles
+                    .iter()
+                    .filter(|s| matches!(s.kind, wordcraft_doc::StyleKind::Paragraph | wordcraft_doc::StyleKind::Character) && !s.hidden)
+                    .map(|s| s.name.clone())
+                    .collect();
+                v.sort_by_key(|n| n.to_lowercase());
+                v.dedup();
+                v
+            },
         };
         f.select("DATE");
         f
@@ -1050,8 +1100,16 @@ impl FieldForm {
             FieldKind::Bookmark => self.bookmarks.first().cloned().unwrap_or_default(),
             FieldKind::Sequence => "Figure".into(),
             FieldKind::Merge => self.merge_fields.first().cloned().unwrap_or_default(),
+            FieldKind::Style => self
+                .styles
+                .iter()
+                .find(|n| n.eq_ignore_ascii_case("Heading 1"))
+                .or(self.styles.first())
+                .cloned()
+                .unwrap_or_else(|| "Heading 1".into()),
             _ => String::new(),
         };
+        self.style_switches.clear();
         if field_kind(name) == FieldKind::Date {
             self.date_format = if name == "TIME" { "h:mm am/pm" } else { "M/d/yyyy" }.into();
         }
@@ -1077,6 +1135,14 @@ impl FieldForm {
                 }
             }
             FieldKind::Toc => s.push_str(" \\o \"1-3\" \\h \\z \\u"),
+            FieldKind::Style if !target.is_empty() => {
+                s.push_str(&format!(" \"{}\"", target.replace(['"', '\\'], "")));
+                for (c, _) in STYLEREF_SWITCHES {
+                    if self.style_switches.contains(*c) {
+                        s.push_str(&format!(" \\{c}"));
+                    }
+                }
+            }
             _ => {}
         }
         if matches!(field_kind(&self.name), FieldKind::Number | FieldKind::Sequence) && !self.number_format.is_empty() {
@@ -1242,6 +1308,24 @@ fn field_options(ui: &mut Ui, f: &mut FieldForm, t: &Tokens) {
                 });
             }
         }
+        FieldKind::Style => {
+            ui.label(tl!("Style name:"));
+            egui::ComboBox::from_id_salt("field_style").selected_text(f.target.clone()).width(200.0).show_ui(ui, |ui| {
+                for n in &f.styles {
+                    ui.selectable_value(&mut f.target, n.clone(), n);
+                }
+            });
+            ui.add_space(4.0);
+            for (c, label) in STYLEREF_SWITCHES {
+                let mut on = f.style_switches.contains(*c);
+                if ui.checkbox(&mut on, tl!(label)).changed() {
+                    f.style_switches.retain(|x| x != *c);
+                    if on {
+                        f.style_switches.push(*c);
+                    }
+                }
+            }
+        }
         FieldKind::Toc | FieldKind::Plain => {
             ui.label(egui::RichText::new(tl!("This field has no options.")).small().color(t.text_dim));
         }
@@ -1286,6 +1370,21 @@ mod tests {
         assert_eq!(wordcraft_engine::cmd::page::sect(&a.session).columns.count, 1);
     }
 
+    /// With text selected, More Columns applies to the selected text by default, as in Word
+    /// (#2024): the other paragraphs keep one column.
+    #[test]
+    fn columns_dialog_applies_to_the_selected_text() {
+        let mut a = app();
+        assert!(!ColumnsForm::read(&a).selection, "no selection, no Selected text");
+        a.run("select.paragraph", json!({})).unwrap();
+        let mut f = ColumnsForm::read(&a);
+        assert_eq!((f.selection, f.apply.as_str()), (true, "selection"));
+        f.preset("two");
+        a.run("layout.columns", f.params()).unwrap();
+        let counts: Vec<u32> = a.session.doc.sections().iter().map(|(_, x)| x.columns.count).collect();
+        assert_eq!(counts, vec![2, 1]);
+    }
+
     /// The Symbol dialog inserts in the chosen font and remembers the symbol.
     #[test]
     fn symbol_dialog_inserts_with_its_font() {
@@ -1323,6 +1422,10 @@ mod tests {
         f.select("REF");
         f.target = "intro".into();
         assert_eq!(f.instruction(), r"REF intro \h");
+        f.select("STYLEREF");
+        assert_eq!(f.target, "Heading 1");
+        f.style_switches = "pl".into();
+        assert_eq!(f.instruction(), r#"STYLEREF "Heading 1" \l \p"#);
         f.select("MERGEFIELD");
         f.target = "First Name".into();
         assert_eq!(f.params().unwrap(), json!({"instr": r#"MERGEFIELD "First Name""#, "result": "«First Name»"}));

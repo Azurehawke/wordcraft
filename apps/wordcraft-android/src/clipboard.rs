@@ -2,8 +2,9 @@
 //!
 //! egui-winit has no Android clipboard: copy and paste would stay inside WordCraft. Here what
 //! WordCraft copies is put on the system clipboard (`set_text`, from egui's copy commands each
-//! frame), and Paste reads the system clipboard's text and HTML (the `Services` hooks), so text
-//! moves to and from the browser, mail and other apps. Pictures aren't exchanged.
+//! frame; formatted copies go as HTML with their text, `set_html`), and Paste reads the system
+//! clipboard's text and HTML (the `Services` hooks), so text moves to and from the browser, mail
+//! and other apps. Pictures aren't exchanged.
 
 use jni::JNIEnv;
 use jni::objects::{JObject, JValue};
@@ -62,6 +63,28 @@ pub fn html() -> Option<String> {
     .ok()
     .flatten()?;
     (!html.trim().is_empty() && html.len() <= MAX_CHARS).then_some(html)
+}
+
+/// Put a formatted copy on the system clipboard: `html` with its plain `text`, so apps that take
+/// formatting (mail, other word processors) keep it. `true` when it's there.
+pub fn set_html(html: &str, text: &str) -> bool {
+    with_activity("copying to the clipboard", |env, activity| {
+        let Some(cm) = manager(env, activity)? else { return Ok(false) };
+        let label = env.new_string("WordCraft")?;
+        let plain = env.new_string(text)?;
+        let markup = env.new_string(html)?;
+        let clip = env
+            .call_static_method(
+                "android/content/ClipData",
+                "newHtmlText",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/String;)Landroid/content/ClipData;",
+                &[JValue::Object(&label), JValue::Object(&plain), JValue::Object(&markup)],
+            )?
+            .l()?;
+        env.call_method(&cm, "setPrimaryClip", "(Landroid/content/ClipData;)V", &[JValue::Object(&clip)])?;
+        Ok(true)
+    })
+    .unwrap_or(false)
 }
 
 /// Put `text` on the system clipboard.

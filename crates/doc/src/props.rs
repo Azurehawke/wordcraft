@@ -6,8 +6,37 @@
 use serde::{Deserialize, Serialize};
 
 /// An sRGB colour.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Default)]
 pub struct Rgb(pub u8, pub u8, pub u8);
+
+impl<'de> Deserialize<'de> for Rgb {
+    /// Reads what it writes (`[r, g, b]`) and also a string [`Rgb::parse`] reads, so the colours in
+    /// `CharProps` / `ParaProps` take the `RRGGBB` that `para.borders` and `table.shading` take (#865).
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{Error, SeqAccess, Unexpected, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Rgb;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("`[r, g, b]`, `RRGGBB` or `#RRGGBB`")
+            }
+            fn visit_str<E: Error>(self, s: &str) -> Result<Rgb, E> {
+                Rgb::parse(s).ok_or_else(|| E::invalid_value(Unexpected::Str(s), &self))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Rgb, A::Error> {
+                let mut c = [0u8; 3];
+                for (i, x) in c.iter_mut().enumerate() {
+                    *x = a.next_element()?.ok_or_else(|| A::Error::invalid_length(i, &self))?;
+                }
+                if a.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(A::Error::invalid_length(4, &self));
+                }
+                Ok(Rgb(c[0], c[1], c[2]))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
 
 impl Rgb {
     pub const BLACK: Rgb = Rgb(0, 0, 0);
@@ -343,6 +372,10 @@ pub struct CharProps {
     /// BCP 47 language of complex-script text (`w:lang/@w:bidi`, e.g. `fa-IR`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang_bidi: Option<String>,
+    /// East Asian typography: two lines in one and horizontal in vertical (`w:eastAsianLayout`).
+    /// Kept for round trip; layout doesn't apply it yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub east_asian_layout: Option<EastAsianLayout>,
     /// Hyperlink target: a URL, or `#bookmark` for an internal link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
@@ -355,6 +388,60 @@ pub struct CharProps {
     /// Tracked formatting change (`w:rPrChange`): the formatting before it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fmt_change: Option<Box<PropChange<CharProps>>>,
+}
+
+/// East Asian typography settings of a run (ISO/IEC 29500-1 §17.3.2.10, `w:eastAsianLayout`):
+/// *two lines in one* sets the run's text on two sub-lines inside one line (warichu), *horizontal
+/// in vertical* turns it 90° to read across a vertical line (tate-chu-yoko). Each attribute is
+/// `None` when the file doesn't say.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EastAsianLayout {
+    /// East Asian typography run id (`w:id`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i32>,
+    /// Two lines in one (`w:combine`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combine: Option<bool>,
+    /// Brackets around two lines in one (`w:combineBrackets`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combine_brackets: Option<CombineBrackets>,
+    /// Horizontal in vertical (`w:vert`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vert: Option<bool>,
+    /// Compress horizontal-in-vertical text to the line height (`w:vertCompress`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vert_compress: Option<bool>,
+}
+
+/// Brackets around two lines in one (`ST_CombineBrackets`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CombineBrackets {
+    None,
+    Round,
+    Square,
+    Angle,
+    Curly,
+}
+
+impl CombineBrackets {
+    pub const ALL: [CombineBrackets; 5] =
+        [CombineBrackets::None, CombineBrackets::Round, CombineBrackets::Square, CombineBrackets::Angle, CombineBrackets::Curly];
+    /// OOXML `w:combineBrackets` value.
+    pub fn ooxml(self) -> &'static str {
+        match self {
+            CombineBrackets::None => "none",
+            CombineBrackets::Round => "round",
+            CombineBrackets::Square => "square",
+            CombineBrackets::Angle => "angle",
+            CombineBrackets::Curly => "curly",
+        }
+    }
+    /// The value for `s`, `None` for one the schema doesn't have.
+    pub fn from_ooxml(s: &str) -> Option<CombineBrackets> {
+        CombineBrackets::ALL.into_iter().find(|b| b.ooxml() == s)
+    }
 }
 
 /// A tracked formatting change (ECMA-376 §17.13.5: `w:rPrChange`, `w:pPrChange`,
@@ -413,7 +500,7 @@ impl CharProps {
     pub fn minus(mut self, base: &CharProps) -> CharProps {
         drop_same_fields!(self, base; style, font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
             shading, border, vert_align, caps, small_caps, hidden, spacing, scale, position, kern, outline, shadow, emboss, engrave, lang, no_proof, rtl,
-            cs, font_cs, size_cs, bold_cs, italic_cs, lang_bidi, link, ins, del);
+            cs, font_cs, size_cs, bold_cs, italic_cs, lang_bidi, east_asian_layout, link, ins, del);
         self
     }
 
@@ -424,7 +511,7 @@ impl CharProps {
     pub fn overlay(&mut self, patch: &CharProps) {
         overlay_fields!(self, patch; style, font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
             shading, border, vert_align, caps, small_caps, hidden, spacing, scale, position, kern, outline, shadow, emboss, engrave, lang, no_proof, rtl,
-            cs, font_cs, font_ea, size_cs, bold_cs, italic_cs, lang_bidi, link, ins, del, fmt_change);
+            cs, font_cs, font_ea, size_cs, bold_cs, italic_cs, lang_bidi, east_asian_layout, link, ins, del, fmt_change);
         if let Some(p) = &patch.text_effects {
             self.text_effects.get_or_insert_with(Default::default).overlay(p);
         }
@@ -524,6 +611,10 @@ impl TabLeader {
         }
     }
 }
+
+/// Two tab positions closer than this (points) are the same stop: `para.tabs` replaces at this
+/// tolerance, and the Tabs dialog and the ruler merge and detect no-ops with it.
+pub const TAB_POS_EPS: f32 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TabStop {
@@ -1045,9 +1136,29 @@ pub struct RowProps {
     pub header: bool,
     /// Don't let the row break across pages.
     pub cant_split: bool,
+    /// Table properties this row overrides (`w:tblPrEx`, ECMA-376 §17.4.61): width, alignment,
+    /// indent, borders, shading, layout and cell margins. `Some` when the file has the element.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exceptions: Option<Box<TableProps>>,
+    /// Grid columns skipped before the row's first cell (`w:gridBefore`), and the preferred
+    /// width of that gap in points (`w:wBefore`).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub grid_before: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub w_before: Option<f32>,
+    /// Grid columns left after the row's last cell (`w:gridAfter`), and their width in points
+    /// (`w:wAfter`).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub grid_after: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub w_after: Option<f32>,
     /// Tracked formatting change (`w:trPrChange`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fmt_change: Option<Box<PropChange<RowProps>>>,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -1074,11 +1185,17 @@ pub struct CellProps {
     pub vmerge: VMerge,
     pub shading: Option<Rgb>,
     pub borders: Option<Borders>,
-    pub valign: VAlign,
+    /// Vertical alignment (`w:vAlign`); `None` follows the table style, else top. An explicit
+    /// `Top` beats the style.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub valign: Option<VAlign>,
     /// Cell margins override (top, left, bottom, right), points.
     pub margins: Option<[f32; 4]>,
     /// Which way the cell's text runs.
     pub text_direction: TextDirection,
+    /// The file states the horizontal direction (`lrTb`) outright; saving writes it back.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub text_direction_set: bool,
     pub no_wrap: bool,
     /// The cell's last paragraph takes no room when it is empty (`w:hideMark`): a row of such
     /// empty cells shrinks to its borders.
@@ -1168,11 +1285,26 @@ mod tests {
             assert_eq!(serde_json::to_string(&c).unwrap(), j, "written as before");
             assert_eq!(read(j).unwrap(), c);
         }
-        for bad in [r#""1B161""#, r#""zzzzzz""#, r#""""#, r#"{"Rgb":"1B1611"}"#, r#"{"Hex":[1,2,3]}"#, "7", "[27,22,17]"] {
+        for bad in [r#""1B161""#, r#""zzzzzz""#, r#""""#, r#"{"Rgb":"1B16"}"#, r#"{"Rgb":[1,2]}"#, r#"{"Hex":[1,2,3]}"#, "7", "[27,22,17]"] {
             assert!(read(bad).is_err(), "{bad}");
         }
+        assert_eq!(read(r#"{"Rgb":"1B1611"}"#).unwrap(), ink);
         let p: CharProps = serde_json::from_value(serde_json::json!({"color": "#1B1611", "bold": true})).unwrap();
         assert_eq!((p.color, p.bold), (Some(ink), Some(true)));
+    }
+
+    /// #865: an [`Rgb`] reads `RRGGBB` / `#RRGGBB` as well as the `[r, g, b]` it still writes.
+    #[test]
+    fn rgb_reads_hex_and_keeps_its_serialized_form() {
+        let read = |j: &str| serde_json::from_str::<Rgb>(j);
+        let ink = Rgb(0x1B, 0x16, 0x11);
+        assert_eq!(serde_json::to_string(&ink).unwrap(), "[27,22,17]", "written as before");
+        for j in ["[27,22,17]", r#""1B1611""#, r##""#1b1611""##] {
+            assert_eq!(read(j).unwrap(), ink, "{j}");
+        }
+        for bad in ["[27,22]", "[27,22,17,0]", "[27,22,300]", "[-1,0,0]", r#""auto""#, r#""1B161""#, r#""""#, "7", "null", r#"{"r":1}"#] {
+            assert!(read(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

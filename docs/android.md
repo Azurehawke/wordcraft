@@ -73,10 +73,12 @@ and that copy is what you edit and save. Each document opens in a tab of its own
 - **Keyboard:** with a keyboard cover or Bluetooth keyboard attached, the on-screen keyboard stays
   away; without one, it comes up when you tap into the document or a text field. Desktop
   shortcuts work (Ctrl+S, Ctrl+B, Ctrl+Z…).
-- **Clipboard:** text you copy in WordCraft can be pasted in other apps, and Paste takes text and
-  formatted (HTML) copies from other apps. Pictures aren't exchanged with other apps.
-- **Saving:** AutoSave works for documents that have been saved once. Android may stop a
-  WordCraft that is in the background, so save before switching away from an untitled document.
+- **Clipboard:** what you copy in WordCraft goes to other apps with its formatting (as HTML, with
+  plain text for apps that want that), and Paste takes text and formatted copies from other apps.
+  Pictures aren't exchanged with other apps.
+- **Saving:** AutoSave works for documents that have been saved once. Unsaved work, untitled
+  documents included, is also kept as a recovery copy: if Android stops WordCraft in the
+  background, File ▸ Home offers it back the next time WordCraft starts.
 - **Not on Android:** printing to a printer (File ▸ Print can still save a PDF) and the
   `--control` automation channel.
 - Settings, the custom dictionary, added fonts and logs live in the app's private folder;

@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 mod region;
 pub use region::Region;
+mod pixels;
+pub use pixels::{MAX_DECODED_BYTES, MAX_RASTER_PIXELS, decode_fits, fit_pixels, rgba_bytes, rgba_fits};
 
 /// Points per inch.
 pub const PT_PER_IN: f32 = 72.0;
@@ -124,7 +126,11 @@ pub fn parse_measure(s: &str, default: Unit) -> Option<f32> {
         "px" => 0.75,
         _ => return None,
     };
-    Some(v * k)
+    let res = v * k;
+    if !res.is_finite() {
+        return None;
+    }
+    Some(res)
 }
 
 /// A point in page space (points, y down).
@@ -324,6 +330,17 @@ mod tests {
         assert_eq!(parse_measure("1.5\"", Unit::Centimeters), Some(108.0));
         assert_eq!(parse_measure("\u{2212}1 in", Unit::Points), Some(-72.0));
         assert_eq!(parse_measure("1,2,3", Unit::Inches), None);
+        // Overflowing values during unit conversion return None (#1359).
+        assert_eq!(parse_measure("3.4e38 in", Unit::Points), None);
+        assert_eq!(parse_measure("-3.4e38 in", Unit::Points), None);
+        assert_eq!(parse_measure("3.4e38 cm", Unit::Points), None);
+        assert_eq!(parse_measure("3.4e38 mm", Unit::Points), None);
+        assert_eq!(parse_measure("3.4e38 pi", Unit::Points), None);
+        assert_eq!(parse_measure("3.4e38 li", Unit::Points), None);
+        assert_eq!(parse_measure("3.4e38", Unit::Inches), None);
+        assert_eq!(parse_measure("1e39 pt", Unit::Points), None);
+        assert_eq!(parse_measure("inf", Unit::Points), None);
+        assert_eq!(parse_measure("nan", Unit::Points), None);
     }
 
     #[test]

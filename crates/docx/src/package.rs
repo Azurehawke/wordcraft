@@ -30,6 +30,8 @@ pub mod rt {
     pub const ENDNOTES: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes";
     pub const COMMENTS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
     pub const COMMENTS_EX: &str = "http://schemas.microsoft.com/office/2011/relationships/commentsExtended";
+    pub const COMMENTS_IDS: &str = "http://schemas.microsoft.com/office/2016/09/relationships/commentsIds";
+    pub const COMMENTS_EXTENSIBLE: &str = "http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible";
     pub const HEADER: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header";
     pub const FOOTER: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
     pub const IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
@@ -42,6 +44,38 @@ pub mod rt {
     pub const DIAGRAM_QUICK_STYLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramQuickStyle";
     pub const DIAGRAM_COLORS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramColors";
     pub const CUSTOM_XML: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml";
+    pub const GLOSSARY: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/glossaryDocument";
+}
+
+/// Content type of a glossary document part (ECMA-376 Part 1 §11.3.8).
+pub const GLOSSARY_CONTENT_TYPE: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml";
+/// `Document::passthrough` key: a fingerprint of `Document::glossary` as read, so a save can tell
+/// an untouched glossary (written back verbatim) from an edited one (written from the model).
+/// Not a package part: WordCraft's own bookkeeping.
+pub const GLOSSARY_READ: &str = "wordcraft:glossary.read";
+/// Most building blocks read from one glossary.
+pub const MAX_GLOSSARY_ENTRIES: usize = 10_000;
+/// The glossary entry types `w:type` takes (ST_DocPartType); others aren't kept.
+pub const GLOSSARY_TYPES: [&str; 7] = ["none", "normal", "autoExp", "toolbar", "speller", "formFld", "bbPlcHdr"];
+/// The insertion behaviours `w:behavior` takes (ST_DocPartBehavior); others aren't kept.
+pub const GLOSSARY_BEHAVIORS: [&str; 3] = ["content", "p", "pg"];
+
+/// A fingerprint of `glossary` (FNV-1a over its debug form): stable across runs and builds that
+/// keep the model's shape, and cheap (nothing is allocated).
+pub fn glossary_fingerprint(glossary: &[wordcraft_doc::BuildingBlock]) -> String {
+    struct Fnv(u64);
+    impl std::fmt::Write for Fnv {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            for b in s.bytes() {
+                self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+            Ok(())
+        }
+    }
+    let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+    // Writing into `Fnv` never fails.
+    let _ = std::fmt::Write::write_fmt(&mut h, format_args!("{glossary:?}"));
+    format!("{:016x}", h.0)
 }
 
 /// `Document::passthrough` key for a macro project, kept as opaque bytes (never parsed or run).
@@ -58,9 +92,26 @@ pub const MAX_VBA_RELATED: usize = 64;
 /// types and own relationships, as [`EmbeddedManifest`] lines. Each part's bytes are kept under its
 /// part name. Not a package part: WordCraft's own bookkeeping.
 pub const EMBEDDED_PARTS: &str = "wordcraft:embedded.parts";
+/// The font table kept from a file (read by `Reader::keep_part_tree`), with the fonts it embeds.
+pub const FONT_TABLE_PART: &str = "word/fontTable.xml";
 /// Custom XML roots kept by the package (P) or main document (D): `owner\ttype\tpart`.
 /// Their opaque bytes and related parts use the same bounded manifest as embedded objects.
 pub const CUSTOM_XML_ROOTS: &str = "wordcraft:customXml.roots";
+/// The original `word/settings.xml` when it holds settings the model doesn't (merged into on
+/// save by `write::settings_merge`). Not a package part: WordCraft's own bookkeeping.
+pub const SETTINGS_ORIG: &str = "wordcraft:settings.orig";
+/// Extended properties (`docProps/app.xml`) the model doesn't hold but a save keeps
+/// ([`APP_KEPT_PROPS`]): `name\tvalue` lines. Not a package part: WordCraft's own bookkeeping.
+pub const APP_KEPT: &str = "wordcraft:app.kept";
+/// The `docProps/app.xml` properties carried over from the file. Counts (pages, lines,
+/// characters, editing time) and the producing application's version are not: they describe
+/// the file Word saved, not the one WordCraft writes.
+pub const APP_KEPT_PROPS: &[&str] =
+    &["Template", "Manager", "Company", "HyperlinkBase", "ScaleCrop", "LinksUpToDate", "SharedDoc", "HyperlinksChanged"];
+/// Parts WordCraft doesn't model, carried verbatim: `owner\ttype\tpart` lines (owner `P` for
+/// the package, `D` for the main document), with their bytes and relationships in the
+/// [`EmbeddedManifest`]. Not a package part: WordCraft's own bookkeeping.
+pub const UNMODELLED_ROOTS: &str = "wordcraft:unmodelled.roots";
 /// Most parts we carry along for a file's embedded objects.
 pub const MAX_EMBEDDED_PARTS: usize = 4096;
 /// Most relationships we keep for one such part.

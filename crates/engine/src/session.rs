@@ -11,6 +11,11 @@ pub fn set_system_locale(tag: &str) {
     let _ = SYSTEM_LOCALE.set(tag.to_string());
 }
 
+/// The system locale [`set_system_locale`] recorded, if the shell set one.
+pub(crate) fn system_locale() -> Option<&'static str> {
+    SYSTEM_LOCALE.get().map(String::as_str)
+}
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wordcraft_doc::edit::Fragment;
@@ -138,6 +143,9 @@ pub struct ViewState {
     pub single_column: bool,
     /// Zoom to fit: "pageWidth", "onePage", "multiplePages", or empty.
     pub fit: String,
+    /// Web Layout's text width, which the UI keeps at the window's width (#1876); never saved.
+    /// Draft and Outline don't use it: they keep a fixed 800 pt column.
+    #[serde(skip, default = "default_web_width")]
     pub web_width: f32,
     /// Transient viewport metrics for reading pagination; never saved in a document or preferences.
     #[serde(skip, default = "default_read_width")]
@@ -180,10 +188,21 @@ pub struct ViewState {
     /// Developer › Design Mode: every content control shows its frame and title.
     #[serde(default)]
     pub design_mode: bool,
+    /// View › Window › Full Screen (F11): the window fills the screen (#980). The front end
+    /// carries it to the window.
+    #[serde(default)]
+    pub full_screen: bool,
 }
 
 fn on() -> bool {
     true
+}
+
+/// The text column of Draft and Outline, and of Web Layout in a headless session.
+const DRAFT_WIDTH: f32 = 800.0;
+
+fn default_web_width() -> f32 {
+    DRAFT_WIDTH
 }
 
 fn default_read_width() -> f32 {
@@ -220,7 +239,7 @@ impl Default for ViewState {
             multi_page: false,
             single_column: false,
             fit: String::new(),
-            web_width: 800.0,
+            web_width: default_web_width(),
             read_width: default_read_width(),
             read_height: default_read_height(),
             read_column_width: None,
@@ -237,6 +256,7 @@ impl Default for ViewState {
             hide_white_space: false,
             outline: Default::default(),
             design_mode: false,
+            full_screen: false,
         }
     }
 }
@@ -327,6 +347,9 @@ pub struct Session {
     /// Formatting picked with a collapsed caret, applied to the next typed text.
     pub pending: Option<CharProps>,
     pub path: Option<std::path::PathBuf>,
+    /// Name given to a document not saved yet (File › Info › Rename): what Save suggests. A file
+    /// name, not document metadata, so it is not part of the document or its undo history.
+    pub file_name: Option<String>,
     pub dirty: bool,
     /// Where the custom dictionary is kept on disk, if the host wired one up. Only the desktop
     /// app does: headless sessions (MCP, `wordcraft-cli run`), tests and the web build leave
@@ -338,6 +361,9 @@ pub struct Session {
     pub pending_move: Option<crate::cmd::moves::PendingMove>,
     /// Plain text mirror of the clipboard (for the system clipboard).
     pub clipboard_text: String,
+    /// HTML for the system clipboard beside [`Self::clipboard_text`]: the copy's formatting for
+    /// programs that read HTML, equations as MathML (#816); empty when nothing was copied.
+    pub clipboard_html: String,
     /// Items collected by Copy and Cut this session, for the Clipboard pane.
     pub clip_history: crate::cmd::edit::ClipHistory,
     pub find: FindState,
@@ -354,6 +380,10 @@ pub struct Session {
     pub painter: Option<(CharProps, wordcraft_doc::props::ParaProps, bool)>,
     /// Last message for the status bar / agents.
     pub status: String,
+    /// Headers/footers `insert.createHeader`/`insert.createFooter` made for a page that had none
+    /// (#960): `insert.closeHeader` takes those still empty away again, as Word does, and saving
+    /// leaves them out. Kept after that, so one an undo brings back goes again on the next close.
+    pub new_header_parts: Vec<u32>,
     /// Undo and redo steps. Shared so `run` can snapshot both stacks cheaply (a pointer per
     /// step) and put them back exactly when a command fails.
     history: Vec<Arc<Undo>>,
@@ -364,13 +394,15 @@ pub struct Session {
     typing_open: bool,
     /// The next mutating command joins the previous undo step (later frames of a drag).
     join_next: bool,
+    /// The newest automatic capitalisation, for Word's "Automatically add words to list" (#1857).
+    pub(crate) autocap: Option<crate::cmd::tools::AutoCap>,
     rev: u64,
     /// Which document this is: changes when [`Session::set_document`] replaces it (open, new,
     /// mail merge, recover), never on an edit.
     document_id: u64,
     cache: LayoutCache,
     /// (revision, width, read height, view, read line spacing, layout, proofing, outline,
-    /// (deletions left out, body deletions in balloons), numeral display).
+    /// (deletions left out, deletions marked Hidden, body deletions in balloons), numeral display).
     #[allow(clippy::type_complexity)]
     layout: Option<(
         u64,
@@ -381,7 +413,7 @@ pub struct Session {
         Arc<DocLayout>,
         bool,
         Option<wordcraft_layout::outline::OutlineView>,
-        (bool, bool),
+        (bool, wordcraft_layout::HideDeleted, bool),
         NumeralMode,
     )>,
     /// Picture edits: edited media key → original media key (Reset Picture).
@@ -429,6 +461,8 @@ pub struct Session {
     /// Password, `file.encrypt`); `None` saves them unencrypted. Kept from a password-protected
     /// file that was opened, cleared when the document is replaced.
     pub password: Option<crate::io::Password>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) recovery: Option<crate::recovery::Recovery>,
     /// More pictures and shapes selected along with the one the selection holds (Shift+click),
     /// for Group. Cleared by any edit or selection change other than adding to it.
     pub also_selected: Vec<Pos>,
@@ -488,6 +522,10 @@ pub struct Prefs {
     /// The region the user chose for new documents, units and the decimal separator (a locale
     /// tag like `pl-PL`, File › Options › Advanced › Region); `None` follows the system.
     pub region: Option<String>,
+    /// A folder searched for Hunspell dictionaries before the system locations (File › Options ›
+    /// Proofing, #1063): an app started from Finder or the Dock doesn't see
+    /// `WORDCRAFT_DICTIONARIES`. `None` searches the system locations only.
+    pub dictionaries_folder: Option<String>,
     /// Formatting marks shown even while Show/Hide ¶ is off.
     pub marks: wordcraft_layout::display::FormattingMarks,
     /// Mark grammar errors as you type (with Check spelling as you type on).
@@ -512,6 +550,7 @@ impl Default for Prefs {
             overtype: false,
             units: Default::default(),
             region: None,
+            dictionaries_folder: None,
             marks: Default::default(),
             mark_grammar: true,
             ignore_uppercase: true,
@@ -569,11 +608,13 @@ impl Session {
             view: ViewState::default(),
             pending: None,
             path: None,
+            file_name: None,
             user_dict_path: None,
             dirty: false,
             clipboard: None,
             pending_move: None,
             clipboard_text: String::new(),
+            clipboard_html: String::new(),
             clip_history: Default::default(),
             find: FindState::default(),
             goal_x: None,
@@ -583,11 +624,13 @@ impl Session {
             initials: String::new(),
             painter: None,
             status: String::new(),
+            new_header_parts: Vec::new(),
             history: Vec::new(),
             undo_evicted: 0,
             redo: Vec::new(),
             typing_open: false,
             join_next: false,
+            autocap: None,
             rev: 1,
             document_id: 1,
             cache: LayoutCache::new(),
@@ -613,6 +656,8 @@ impl Session {
             editing_lang: None,
             read_aloud: Default::default(),
             password: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            recovery: None,
             column: None,
             column_mode: false,
             widened: None,
@@ -672,6 +717,12 @@ impl Session {
         self.widened.as_ref().filter(|w| w.sel == self.sel).map_or(&self.sel, |w| &w.ends)
     }
 
+    pub fn selects_whole_story(&self) -> bool {
+        let st = self.sel.focus.story;
+        let (a, b) = self.sel.ordered();
+        a == self.doc.start_of(st) && b == self.doc.end_of(st)
+    }
+
     /// Document revision (bumped by every change).
     pub fn rev(&self) -> u64 {
         self.rev
@@ -727,13 +778,17 @@ impl Session {
     /// The current layout (recomputed when the document or view changed).
     pub fn layout(&mut self) -> Arc<DocLayout> {
         let mode = if self.view.read_mode { ViewMode::Read } else { self.view.mode };
-        let width = if self.view.read_mode { self.view.read_width } else { self.view.web_width };
+        let width = match mode {
+            ViewMode::Read => self.view.read_width,
+            ViewMode::Web => self.view.web_width,
+            _ => DRAFT_WIDTH,
+        };
         let height = if self.view.read_mode { self.view.read_height } else { 0.0 };
         let spacing = if self.view.read_mode { self.view.read_line_spacing.map(f32::to_bits) } else { None };
         // Deletions in balloons depend on the view (the Comments pane, Read Mode, side by side), so
         // a view change that moves them in or out of the text lays it out again.
-        let hide_deleted = !self.view.show_markup || self.prefs.markup.hides_deletions();
-        let deleted = (hide_deleted, self.revisions_in_balloons());
+        let hide_deleted = !self.view.show_markup;
+        let deleted = (hide_deleted, self.prefs.markup.hidden_deletions(), self.revisions_in_balloons());
         let outline = (mode == ViewMode::Outline).then(|| self.view.outline.view());
         if let Some((r, w, h, m, sp, l, pf, o, hd, n)) = &self.layout
             && *r == self.rev
@@ -755,7 +810,8 @@ impl Session {
             read_line_spacing: spacing.map(f32::from_bits),
             show_hidden: self.view.marks || self.prefs.marks.hidden,
             hide_deleted,
-            deletions_in_balloons: deleted.1,
+            hide_marked: deleted.1,
+            deletions_in_balloons: deleted.2,
             proofing: self.view.proofing,
             numeral: self.view.numeral.resolve(SYSTEM_LOCALE.get().map(String::as_str)),
             comment_balloons: false,
@@ -840,8 +896,10 @@ impl Session {
     }
     /// Stamp the document's save metadata (modified time, last modified by, revision; created
     /// when it has none) the way Word does on every save. `file.save` calls it, and so does any
-    /// front end that writes the bytes itself (the web build's download, #262).
+    /// front end that writes the bytes itself (the web build's download, #262). Like Word, the
+    /// document also keeps the zoom it is shown at (#995).
     pub fn stamp_save(&mut self) {
+        self.doc.settings.zoom = crate::cmd::view::saved_zoom(&self.view);
         let core = &mut self.doc.core;
         core.modified = crate::cmd::now_iso();
         if core.created.is_empty() {
@@ -849,6 +907,17 @@ impl Session {
         }
         core.last_modified_by = self.author.clone();
         core.revision = core.revision.saturating_add(1);
+    }
+    /// Whether typing is still collecting into one undo step (no other command since).
+    pub fn typing_open(&self) -> bool {
+        self.typing_open
+    }
+    /// Reopen the typing group when the last undo step is typing, so the keys typed next join
+    /// it: after an input method's rewrite was joined to it (`join_next_undo` closes the group).
+    pub fn continue_typing(&mut self) {
+        if self.undo_label() == Some("Typing") {
+            self.typing_open = true;
+        }
     }
     /// Close an open typing group (caret moved, other command).
     pub fn close_typing(&mut self) {
@@ -865,6 +934,10 @@ impl Session {
     }
     pub fn redo_label(&self) -> Option<&str> {
         self.redo.last().map(|u| u.label.as_str())
+    }
+    /// Undo steps pushed so far, evicted ones included: only grows while steps are added.
+    pub(crate) fn undo_steps_so_far(&self) -> u64 {
+        self.history.len() as u64 + self.undo_evicted
     }
     /// The number of undo steps.
     pub fn undo_depth(&self) -> usize {
@@ -890,6 +963,12 @@ impl Session {
     }
     pub fn undo(&mut self) -> bool {
         self.typing_open = false;
+        // Undoing the automatic capitalisation's own step makes its word an exception; any
+        // other Undo forgets the capital.
+        let steps = self.history.len() as u64 + self.undo_evicted;
+        if let Some(c) = self.autocap.take().filter(|c| c.depth == steps) {
+            c.add_exceptions(&mut self.prefs.autocorrect);
+        }
         let Some(u) = self.history.pop().map(Arc::unwrap_or_clone) else { return false };
         let cur = Undo {
             label: u.label.clone(),
@@ -923,6 +1002,7 @@ impl Session {
     }
     /// Drop history (after open / new).
     pub fn reset_history(&mut self) {
+        self.autocap = None;
         self.history.clear();
         self.redo.clear();
         self.typing_open = false;
@@ -955,11 +1035,13 @@ impl Session {
 
     /// Replace the document (open/new).
     pub fn set_document(&mut self, doc: Document) {
+        self.autocap = None;
         self.document_id = self.document_id.wrapping_add(1);
         self.bib_style = doc_bib_style(&doc);
         self.doc = doc;
         self.doc.ensure_nonempty();
         self.password = None;
+        self.file_name = None;
         self.sel = Selection::caret(self.doc.start_of(StoryRef::Body));
         self.pending = None;
         self.also_selected.clear();
@@ -967,6 +1049,7 @@ impl Session {
         self.column_mode = false;
         self.widened = None;
         self.edit_marks.clear();
+        self.new_header_parts.clear();
         self.go_back_step = 0;
         self.view.outline.collapsed.clear();
         self.reset_history();
@@ -998,6 +1081,7 @@ impl Session {
             view: _,
             pending: _,
             path: _,
+            file_name: _,
             // The custom dictionary file, like the file path: host wiring, not an edit.
             user_dict_path: _,
             dirty,
@@ -1005,6 +1089,7 @@ impl Session {
             // Like the clipboard: what the next paste can make a move of.
             pending_move: _,
             clipboard_text: _,
+            clipboard_html: _,
             clip_history: _,
             find: _,
             goal_x: _,
@@ -1014,11 +1099,14 @@ impl Session {
             initials: _,
             painter: _,
             status: _,
+            // Headers just created to edit: closing checks they still exist and are empty.
+            new_header_parts: _,
             history,
             undo_evicted,
             redo,
             typing_open,
             join_next,
+            autocap: _,
             rev: _,
             cache: _,
             layout: _,
@@ -1046,6 +1134,8 @@ impl Session {
             math_normal_text: _,
             // The save password, like the file path: not an edit to the document.
             password: _,
+            #[cfg(not(target_arch = "wasm32"))]
+                recovery: _,
             also_selected: _,
             // Column selection and a widened selection's ends, like `sel`'s shape: valid only while
             // `sel` matches them.
@@ -1081,6 +1171,7 @@ impl Session {
             self.history.splice(0..0, head.into_iter().take(back));
         }
         self.undo_evicted = evicted;
+        self.autocap = None;
         self.doc = doc;
         self.sel = sel;
         self.also_selected.clear();
@@ -1125,6 +1216,8 @@ impl Session {
         }
         // Restrict Editing: refused outright, or allowed as long as it only edits the exceptions.
         let guard = if spec.mutates { crate::cmd::protect::check_before(self, id, params)? } else { false };
+        // Quick Parts aren't part of the document, so a refused edit puts them back itself (the Spike).
+        let blocks_before = guard.then(|| self.building_blocks.clone());
         if spec.mutates && self.doc.settings.protection.as_deref() == Some("trackedChanges") {
             self.doc.settings.track_changes = true;
         }
@@ -1238,6 +1331,7 @@ impl Session {
                 }
             }
             Err(e) => {
+                self.autocap = None;
                 if let Some((d, s, h, r, t, ev, c)) = before_doc {
                     self.doc = d;
                     self.sel = s;
@@ -1247,6 +1341,9 @@ impl Session {
                     // The steps the command pushed out are back, so they no longer count as gone.
                     self.undo_evicted = ev;
                     self.column = c;
+                }
+                if let Some(b) = blocks_before {
+                    self.building_blocks = b;
                 }
                 self.status = e.to_string();
             }
@@ -1262,8 +1359,18 @@ impl Session {
         self.sel.focus.story
     }
 
-    /// Formatting typing would use at the caret.
+    /// Formatting typing would use at the caret: the caret's, except run direction. New text
+    /// takes its direction from its own letters, as on screen, so Latin typed or inserted into
+    /// reopened Hebrew isn't saved as right-to-left; the DOCX writer marks right-to-left pieces
+    /// itself (#1543). The bidi language stays (it only applies to complex-script text).
     pub fn typing_props(&self) -> CharProps {
+        let mut c = self.caret_props();
+        c.rtl = None;
+        c
+    }
+
+    /// The caret's formatting, as Reveal Formatting shows it.
+    pub fn caret_props(&self) -> CharProps {
         if let Some(p) = &self.pending {
             return p.clone();
         }
@@ -1273,7 +1380,12 @@ impl Session {
         // As in Word, text typed at either end of a hyperlink isn't part of it; only typing
         // inside the link extends it.
         let inside_link = props.link.is_some() && f.off > 0 && f.off < p.len() && p.props_of_char(f.off).link == props.link;
-        if props.link.is_some() && !inside_link { props.unlinked() } else { props.clone() }
+        let mut out = if props.link.is_some() && !inside_link { props.unlinked() } else { props.clone() };
+        // A footnote or endnote number is raised by its character style; text typed after it is body text.
+        if matches!(out.style.as_deref(), Some("FootnoteReference" | "EndnoteReference")) {
+            out.style = None;
+        }
+        out
     }
 
     /// Words in the document, as the status bar shows them (see [`Prefs::count_notes`]).

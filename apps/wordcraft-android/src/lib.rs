@@ -5,7 +5,8 @@
 //! The UI is the desktop one (`wordcraft-ui-egui`); what differs on Android:
 //! - Files: Open, Save As and the other file choices use WordCraft's built-in file browser over
 //!   shared storage, which needs "All files access" granted once in Settings (`file_access`).
-//! - Settings, the custom dictionary, added fonts and logs live in the app's internal data folder.
+//! - Settings, the custom dictionary, added fonts and recovery copies (unsaved work kept for when
+//!   Android stops the app, as the desktop keeps it for a crash) live in the app's data folder.
 //! - Touch, S Pen, mouse, system bars and the keyboard cover (`tablet`); the system clipboard
 //!   through JNI (`clipboard`); documents from other apps ("Open with", `incoming`); new builds
 //!   from the GitHub repository the APK was built from (`updater`).
@@ -61,18 +62,36 @@ fn load_prefs(app: &mut WordApp) {
 /// without warning) and on exit.
 pub(crate) fn save_prefs(app: &WordApp) {
     let Some(p) = prefs_path() else { return };
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    if let Some(dir) = p.parent()
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        log::warn!("settings: cannot create {}: {e}", dir.display());
+        return;
     }
     match serde_json::to_vec_pretty(&app.prefs()) {
         Ok(bytes) => {
-            if let Err(e) = std::fs::write(&p, bytes) {
+            if let Err(e) = write_atomically(&p, &bytes) {
                 log::warn!("settings not saved to {}: {e}", p.display());
             }
         }
         Err(e) => log::warn!("settings not saved: {e}"),
     }
 }
+
+/// Write `bytes` to a sibling temporary file and rename it over `path`, so Android stopping the
+/// app mid-write leaves the previous settings in place (as the desktop app writes them).
+fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "ui.json".into());
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+/// The UI's context, for recovery's worker to wake the UI when it has news.
+static CTX: OnceLock<egui::Context> = OnceLock::new();
 
 /// The custom dictionary (Add to Dictionary) file in the settings folder, as on the desktop.
 fn user_dict_path() -> Option<PathBuf> {
@@ -136,6 +155,7 @@ fn services(requests: &TabRequests) -> Services {
         storage: Some(StorageAccess { granted: Box::new(file_access::granted), request: Box::new(file_access::request), places: Box::new(places) }),
         clipboard_text: Some(Box::new(clipboard::text)),
         clipboard_html: Some(Box::new(clipboard::html)),
+        set_clipboard_html: Some(Box::new(|html, text, _mathml| clipboard::set_html(html, text))),
         ..Default::default()
     }
 }
@@ -146,6 +166,15 @@ pub(crate) fn new_tab(requests: &TabRequests) -> WordApp {
     let mut session = Session::new(wordcraft_engine::blank_document(&region));
     session.system_region = region;
     session.user_dict_path = user_dict_path();
+    // Recovery copies of unsaved work, as on the desktop: each tab's documents are locked by it,
+    // so tabs share the folder the way desktop windows do, and File › Home offers what a stopped
+    // app left.
+    if let Some(dir) = wordcraft_control_key::settings_dir()
+        && let Some(ctx) = CTX.get().cloned()
+        && let Err(e) = session.enable_recovery(dir.join("recovery"), std::sync::Arc::new(move || ctx.request_repaint()))
+    {
+        log::warn!("local recovery unavailable: {e}");
+    }
     let mut app = WordApp::new(session, services(requests));
     load_prefs(&mut app);
     // A region chosen in File › Options replaces the system's for the blank document.
@@ -194,6 +223,7 @@ fn android_main(android: AndroidApp) {
         options,
         Box::new(|cc| {
             load_user_files();
+            let _ = CTX.set(cc.egui_ctx.clone());
             let requests = TabRequests::default();
             let mut app = new_tab(&requests);
             if let Some(state) = &cc.wgpu_render_state {

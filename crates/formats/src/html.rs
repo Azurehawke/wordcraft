@@ -41,18 +41,19 @@ pub fn decode_entity(name: &str) -> Option<String> {
         "lt" | "LT" => '<',
         "gt" | "GT" => '>',
         "quot" | "QUOT" => '"',
-        "apos" => '\'',
-        "nbsp" => '\u{00A0}',
+        "apos" | "APOS" => '\'',
+        "nbsp" | "NBSP" => '\u{00A0}',
         "ensp" => '\u{2002}',
         "emsp" => '\u{2003}',
         "thinsp" => '\u{2009}',
         "shy" => '\u{00AD}',
-        "copy" => '©',
-        "reg" => '®',
-        "trade" => '™',
+        "copy" | "COPY" => '©',
+        "reg" | "REG" => '®',
+        "trade" | "TRADE" => '™',
         "hellip" => '…',
         "mdash" => '—',
         "ndash" => '–',
+        "minus" => '−',
         "lsquo" => '‘',
         "rsquo" => '’',
         "sbquo" => '‚',
@@ -70,12 +71,28 @@ pub fn decode_entity(name: &str) -> Option<String> {
         "frac12" => '½',
         "frac14" => '¼',
         "frac34" => '¾',
+        "frac13" => '⅓',
+        "frac23" => '⅔',
+        "frac18" => '⅛',
+        "frac38" => '⅜',
+        "frac58" => '⅝',
+        "frac78" => '⅞',
+        "sup1" => '¹',
+        "sup2" => '²',
+        "sup3" => '³',
+        "micro" => 'µ',
+        "permil" => '‰',
+        "prime" => '′',
+        "Prime" => '″',
+        "oline" => '‾',
+        "frasl" => '⁄',
         "sect" => '§',
         "para" => '¶',
-        "euro" => '€',
-        "pound" => '£',
-        "yen" => '¥',
-        "cent" => '¢',
+        "euro" | "EURO" => '€',
+        "pound" | "POUND" => '£',
+        "yen" | "YEN" => '¥',
+        "cent" | "CENT" => '¢',
+        "curren" => '¤',
         "dagger" => '†',
         "Dagger" => '‡',
         "larr" => '←',
@@ -83,10 +100,53 @@ pub fn decode_entity(name: &str) -> Option<String> {
         "uarr" => '↑',
         "darr" => '↓',
         "harr" => '↔',
+        "lArr" => '⇐',
+        "rArr" => '⇒',
+        "uArr" => '⇑',
+        "dArr" => '⇓',
+        "hArr" => '⇔',
+        "crarr" => '↵',
+        "forall" => '∀',
+        "part" => '∂',
+        "exist" => '∃',
+        "empty" => '∅',
+        "nabla" => '∇',
+        "isin" => '∈',
+        "notin" => '∉',
+        "ni" => '∋',
+        "prod" => '∏',
+        "sum" => '∑',
+        "radic" => '√',
+        "prop" => '∝',
+        "ang" => '∠',
+        "and" => '∧',
+        "or" => '∨',
+        "cap" => '∩',
+        "cup" => '∪',
+        "int" => '∫',
+        "there4" => '∴',
+        "sim" => '∼',
+        "cong" => '≅',
+        "asymp" | "approx" => '≈',
+        "ne" => '≠',
+        "equiv" => '≡',
         "le" => '≤',
         "ge" => '≥',
-        "ne" => '≠',
+        "sub" => '⊂',
+        "sup" => '⊃',
+        "nsub" => '⊄',
+        "sube" => '⊆',
+        "supe" => '⊇',
+        "oplus" => '⊕',
+        "otimes" => '⊗',
+        "perp" => '⊥',
+        "sdot" => '⋅',
         "infin" => '∞',
+        "loz" => '◊',
+        "spades" => '♠',
+        "clubs" => '♣',
+        "hearts" => '♥',
+        "diams" => '♦',
         "check" => '✓',
         "iexcl" => '¡',
         "iquest" => '¿',
@@ -100,13 +160,44 @@ pub fn decode_entity(name: &str) -> Option<String> {
         "eacute" => 'é',
         "egrave" => 'è',
         "ecirc" => 'ê',
+        "euml" => 'ë',
         "Eacute" => 'É',
+        "Egrave" => 'È',
+        "Ecirc" => 'Ê',
+        "Euml" => 'Ë',
         "aacute" => 'á',
         "agrave" => 'à',
         "acirc" => 'â',
+        "atilde" => 'ã',
+        "Agrave" => 'À',
+        "Aacute" => 'Á',
+        "Acirc" => 'Â',
+        "Atilde" => 'Ã',
         "iacute" => 'í',
+        "igrave" => 'ì',
+        "icirc" => 'î',
+        "iuml" => 'ï',
+        "Iacute" => 'Í',
+        "Igrave" => 'Ì',
+        "Icirc" => 'Î',
+        "Iuml" => 'Ï',
         "oacute" => 'ó',
+        "ograve" => 'ò',
+        "ocirc" => 'ô',
+        "otilde" => 'õ',
+        "Oacute" => 'Ó',
+        "Ograve" => 'Ò',
+        "Ocirc" => 'Ô',
+        "Otilde" => 'Õ',
         "uacute" => 'ú',
+        "ugrave" => 'ù',
+        "ucirc" => 'û',
+        "Uacute" => 'Ú',
+        "Ugrave" => 'Ù',
+        "Ucirc" => 'Û',
+        "yacute" => 'ý',
+        "yuml" => 'ÿ',
+        "Yacute" => 'Ý',
         "ntilde" => 'ñ',
         "Ntilde" => 'Ñ',
         "ccedil" => 'ç',
@@ -121,11 +212,36 @@ pub fn decode_entity(name: &str) -> Option<String> {
         "beta" => 'β',
         "gamma" => 'γ',
         "delta" => 'δ',
-        "pi" => 'π',
-        "sigma" => 'σ',
+        "epsilon" => 'ε',
+        "zeta" => 'ζ',
+        "eta" => 'η',
+        "theta" => 'θ',
+        "iota" => 'ι',
+        "kappa" => 'κ',
+        "lambda" => 'λ',
         "mu" => 'μ',
-        "Omega" => 'Ω',
+        "nu" => 'ν',
+        "xi" => 'ξ',
+        "pi" => 'π',
+        "rho" => 'ρ',
+        "sigma" => 'σ',
+        "tau" => 'τ',
+        "upsilon" => 'υ',
+        "phi" => 'φ',
+        "chi" => 'χ',
+        "psi" => 'ψ',
         "omega" => 'ω',
+        "Gamma" => 'Γ',
+        "Delta" => 'Δ',
+        "Theta" => 'Θ',
+        "Lambda" => 'Λ',
+        "Xi" => 'Ξ',
+        "Pi" => 'Π',
+        "Sigma" => 'Σ',
+        "Upsilon" => 'Υ',
+        "Phi" => 'Φ',
+        "Psi" => 'Ψ',
+        "Omega" => 'Ω',
         "zwj" => '\u{200D}',
         "zwnj" => '\u{200C}',
         _ => return None,
@@ -233,21 +349,27 @@ impl Lexer<'_> {
             return Some(Tok::Text(String::new()));
         }
         if rest.starts_with("</") {
-            let name: String =
-                rest.strip_prefix("</").unwrap_or("").chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-').collect();
+            let name: String = rest
+                .strip_prefix("</")
+                .unwrap_or("")
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-')
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
             if name.is_empty() {
                 self.pos += 2;
                 return Some(Tok::Text("</".into()));
             }
             self.skip_past(">");
-            return Some(Tok::End(name.to_ascii_lowercase()));
+            return Some(Tok::End(name));
         }
         if !b.get(1).is_some_and(|c| c.is_ascii_alphabetic()) {
             self.pos += 1;
             return Some(Tok::Text("<".into()));
         }
         // Start tag.
-        let name: String = rest[1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-').collect();
+        let name: String =
+            rest[1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-').map(|c| c.to_ascii_lowercase()).collect();
         let mut i = 1 + name.len();
         let mut attrs = Vec::new();
         let mut self_close = false;
@@ -311,7 +433,7 @@ impl Lexer<'_> {
             }
         }
         self.pos += i.min(rest.len());
-        Some(Tok::Start { name: name.to_ascii_lowercase(), attrs, self_close })
+        Some(Tok::Start { name, attrs, self_close })
     }
 }
 
@@ -341,6 +463,7 @@ struct El {
     align: Option<Align>,
     preserve: bool,
     page_break: bool,
+    page_break_after: bool,
     /// Li: a paragraph of this item was already emitted.
     used: bool,
 }
@@ -383,6 +506,8 @@ struct Builder<'r> {
     para: Option<Para>,
     /// The current paragraph continues a list item (joins the previous paragraph).
     para_cont: bool,
+    /// Pending page break from preceding elements with page-break-after or unconsumed break.
+    pending_page_break: bool,
     /// Whether the current paragraph's first / last text was read with preserved white space
     /// (CSS `white-space: pre…`): those edge spaces are kept when the paragraph ends.
     pre_lead: Option<bool>,
@@ -469,7 +594,8 @@ fn closes_p(n: &str) -> bool {
     )
 }
 
-fn css_len_pt(v: &str) -> Option<f32> {
+/// A CSS length (or font-size keyword) in points; `None` when it is not one.
+pub fn css_len_pt(v: &str) -> Option<f32> {
     let v = v.trim().to_ascii_lowercase();
     let num = |s: &str| s.trim().parse::<f32>().ok().filter(|x| x.is_finite());
     if let Some(x) = v.strip_suffix("pt") {
@@ -501,7 +627,7 @@ fn css_len_pt(v: &str) -> Option<f32> {
 }
 
 /// Apply a `style` attribute to formatting / block properties.
-fn apply_style(css: &str, f: &mut Fmt, align: &mut Option<Align>, preserve: &mut bool, page_break: &mut bool) {
+fn apply_style(css: &str, f: &mut Fmt, align: &mut Option<Align>, preserve: &mut bool, page_break: &mut bool, page_break_after: &mut bool) {
     for decl in css.split(';').take(64) {
         let Some((k, v)) = decl.split_once(':') else { continue };
         let k = k.trim().to_ascii_lowercase();
@@ -560,6 +686,7 @@ fn apply_style(css: &str, f: &mut Fmt, align: &mut Option<Align>, preserve: &mut
             }
             "white-space" => *preserve = lv.starts_with("pre"),
             "page-break-before" | "break-before" => *page_break = lv == "always" || lv == "page",
+            "page-break-after" | "break-after" => *page_break_after = lv == "always" || lv == "page",
             _ => {}
         }
     }
@@ -579,6 +706,7 @@ impl<'r> Builder<'r> {
             stack: Vec::new(),
             para: None,
             para_cont: false,
+            pending_page_break: false,
             pre_lead: None,
             pre_tail: false,
             meta: Meta::default(),
@@ -607,7 +735,22 @@ impl<'r> Builder<'r> {
             let mut lists = 0usize;
             for (i, e) in self.stack.iter().enumerate().rev() {
                 match e.kind {
-                    ElKind::Cell | ElKind::Table => break,
+                    ElKind::Cell => {
+                        // CSS inherits `text-align` from the cell, its row, row group and table
+                        // (#1381); the paragraph's own (found above) wins.
+                        if p.align.is_none() {
+                            p.align = self.stack.get(..=i).and_then(|outer| {
+                                outer
+                                    .iter()
+                                    .rev()
+                                    .take_while(|o| o.kind != ElKind::Table)
+                                    .chain(outer.iter().rev().find(|o| o.kind == ElKind::Table))
+                                    .find_map(|o| o.align)
+                            });
+                        }
+                        break;
+                    }
+                    ElKind::Table => break,
                     ElKind::Heading(n) if p.kind == Kind::Normal => p.kind = Kind::Heading(n.clamp(1, 6)),
                     ElKind::Pre if p.kind == Kind::Normal => p.kind = Kind::Code,
                     ElKind::Quote if p.kind == Kind::Normal => p.kind = Kind::Quote,
@@ -633,7 +776,8 @@ impl<'r> Builder<'r> {
             } else {
                 self.para_cont = false;
             }
-            p.page_break = self.stack.iter().rev().take_while(|e| e.kind != ElKind::Cell).any(|e| e.page_break);
+            let pb_before = self.stack.iter_mut().rev().take_while(|e| e.kind != ElKind::Cell).any(|e| std::mem::take(&mut e.page_break));
+            p.page_break = pb_before || std::mem::take(&mut self.pending_page_break);
             self.para = Some(p);
         }
         self.para.get_or_insert_with(Para::default)
@@ -783,6 +927,9 @@ impl<'r> Builder<'r> {
     }
 
     fn close(&mut self, e: &El) {
+        if e.page_break_after || e.page_break {
+            self.pending_page_break = true;
+        }
         if e.kind != ElKind::Inline {
             self.flush();
         }
@@ -809,7 +956,10 @@ impl<'r> Builder<'r> {
                         t.rows.push(r);
                     }
                     let borderless = !t.bordered;
-                    let mut ft = FTable { rows: t.rows.into_iter().filter(|r| !r.is_empty()).collect(), widths: Vec::new(), borderless };
+                    // Keep at most MAX_ROWS rows (the model drops the rest anyway): bounds the
+                    // O(rows × rowspan) work of `insert_covered` on a table of millions of `<tr>`.
+                    let rows: Vec<_> = t.rows.into_iter().filter(|r| !r.is_empty()).take(wordcraft_doc::table::MAX_ROWS).collect();
+                    let mut ft = FTable { rows, widths: Vec::new(), borderless };
                     if !ft.rows.is_empty() {
                         ft.insert_covered();
                         self.container().push(FBlock::Table(ft));
@@ -929,6 +1079,11 @@ impl<'r> Builder<'r> {
                 self.container().push(FBlock::Para(Para::new(Kind::Rule)));
                 return;
             }
+            "wbr" => {
+                let f = self.fmt();
+                self.start_para().push_text("\u{200B}", &f);
+                return;
+            }
             "img" => {
                 let alt = attr(attrs, "alt").unwrap_or("").to_string();
                 let dim = |k: &str| attr(attrs, k).and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok()).map(|p| p * 0.75);
@@ -978,8 +1133,10 @@ impl<'r> Builder<'r> {
         let mut align = None;
         let mut preserve = self.preserve();
         let mut page_break = false;
+        let mut page_break_after = false;
         match name {
-            "b" | "strong" => fmt.bold = true,
+            // A header cell is bold, as in browsers and Word, unless its own CSS says otherwise.
+            "b" | "strong" | "th" => fmt.bold = true,
             "i" | "em" | "cite" | "var" | "dfn" | "address" => fmt.italic = true,
             "u" | "ins" => fmt.underline = true,
             "s" | "strike" | "del" => fmt.strike = true,
@@ -1010,7 +1167,9 @@ impl<'r> Builder<'r> {
             }
             _ => {}
         }
-        if let Some(a) = attr(attrs, "align") {
+        // `align` on a table is about where the table sits (not imported); it doesn't align the
+        // text in its cells.
+        if let Some(a) = attr(attrs, "align").filter(|_| kind != ElKind::Table) {
             align = match a.to_ascii_lowercase().as_str() {
                 "center" | "middle" => Some(Align::Center),
                 "right" => Some(Align::Right),
@@ -1023,7 +1182,7 @@ impl<'r> Builder<'r> {
             align = Some(Align::Center);
         }
         if let Some(st) = attr(attrs, "style") {
-            apply_style(st, &mut fmt, &mut align, &mut preserve, &mut page_break);
+            apply_style(st, &mut fmt, &mut align, &mut preserve, &mut page_break, &mut page_break_after);
         }
         if kind == ElKind::Pre {
             preserve = true;
@@ -1067,7 +1226,7 @@ impl<'r> Builder<'r> {
             }
             _ => {}
         }
-        self.stack.push(El { name: name.to_string(), kind, fmt, align, preserve, page_break, used: false });
+        self.stack.push(El { name: name.to_string(), kind, fmt, align, preserve, page_break, page_break_after, used: false });
     }
 
     fn end(&mut self, name: &str) {
@@ -1125,6 +1284,15 @@ pub fn parse_with(s: &str, images: ImageLoader) -> Flow {
             Tok::Text(t) => b.text(&t),
             Tok::Start { name, attrs, self_close } => {
                 b.close_head_for_start(&name);
+                if crate::mathml::local(&name) == "math" && !self_close {
+                    let el = read_math(&mut lx, name, attrs);
+                    if !b.in_head()
+                        && let Some((linear, display)) = crate::mathml::read(&el)
+                    {
+                        b.start_para().inlines.push(Inline::Equation { linear, display });
+                    }
+                    continue;
+                }
                 if matches!(name.as_str(), "script" | "style" | "noscript" | "template" | "textarea") && !self_close {
                     lx.skip_past(&format!("</{name}"));
                     lx.skip_past(">");
@@ -1138,6 +1306,86 @@ pub fn parse_with(s: &str, images: ImageLoader) -> Flow {
     b.finish()
 }
 
+/// A `<math>` element (#816): its tokens up to the matching end tag, as a tree. Nesting and size
+/// are bounded; an unclosed element ends with the input.
+fn read_math(lx: &mut Lexer, name: String, attrs: Vec<(String, String)>) -> crate::mathml::El {
+    use crate::mathml::{El, Item, MAX_NODES, local};
+    let mut stack: Vec<El> = vec![El { name, attrs, children: Vec::new() }];
+    let mut count = 0usize;
+    let close = |stack: &mut Vec<El>| {
+        if stack.len() > 1
+            && let Some(done) = stack.pop()
+            && let Some(parent) = stack.last_mut()
+        {
+            parent.children.push(Item::El(done));
+        }
+    };
+    while let Some(t) = lx.next() {
+        count += 1;
+        if count > MAX_NODES * 4 {
+            // Over the cap: drop the rest of this element so its tokens aren't read as HTML text.
+            skip_math(lx, t);
+            break;
+        }
+        match t {
+            Tok::Text(t) => {
+                if let Some(top) = stack.last_mut()
+                    && !t.is_empty()
+                {
+                    top.children.push(Item::Text(t));
+                }
+            }
+            Tok::Start { name, attrs, self_close } => {
+                let el = El { name, attrs, children: Vec::new() };
+                if self_close || stack.len() > wordcraft_doc::math::MAX_DEPTH {
+                    if let Some(top) = stack.last_mut() {
+                        top.children.push(Item::El(el));
+                    }
+                } else {
+                    stack.push(el);
+                }
+            }
+            Tok::End(name) => {
+                let name = local(&name).to_string();
+                // Close up to the matching open element; a stray end tag is ignored.
+                if let Some(k) = stack.iter().rposition(|e| local(&e.name) == name) {
+                    if k == 0 {
+                        break;
+                    }
+                    while stack.len() > k {
+                        close(&mut stack);
+                    }
+                }
+            }
+        }
+    }
+    while stack.len() > 1 {
+        close(&mut stack);
+    }
+    stack.pop().unwrap_or_default()
+}
+
+/// Skip tokens (starting with `first`) up to and including the `</math>` that closes the element
+/// being read; nested `<math>` elements are counted. An unclosed element ends with the input.
+fn skip_math(lx: &mut Lexer, first: Tok) {
+    use crate::mathml::local;
+    let mut depth = 0usize;
+    let mut t = Some(first);
+    while let Some(tok) = t {
+        match tok {
+            Tok::Start { name, self_close: false, .. } if local(&name) == "math" => depth = depth.saturating_add(1),
+            Tok::End(name) if local(&name) == "math" => {
+                if depth == 0 {
+                    return;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        t = lx.next();
+    }
+}
+
 /// Parse HTML into a document.
 pub fn import(s: &str) -> Document {
     model::to_doc(&parse(s))
@@ -1146,6 +1394,12 @@ pub fn import(s: &str) -> Document {
 /// [`import`], loading pictures that aren't `data:` URIs through `images`.
 pub fn import_with(s: &str, images: ImageLoader) -> Document {
     model::to_doc(&parse_with(s, images))
+}
+
+/// [`import_with`] onto `page` (its size and margins), which tables size to: HTML gives no page
+/// size, so the caller picks it (the region's paper, #1381).
+pub fn import_on(s: &str, images: ImageLoader, page: &wordcraft_doc::SectionProps) -> Document {
+    model::to_doc_in(&parse_with(s, images), page.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1198,7 +1452,6 @@ fn text_html(t: &str) -> String {
 /// Inline spans → HTML.
 pub fn inlines_html(inlines: &[Inline]) -> String {
     let mut o = String::new();
-    let inlines = crate::model::equations_as_text(inlines);
     for i in inlines.iter() {
         match i {
             Inline::Text(t, f) => {
@@ -1269,7 +1522,8 @@ pub fn inlines_html(inlines: &[Inline]) -> String {
             Inline::Anchor(a) => o.push_str(&format!("<a id=\"{}\"></a>", esc(a))),
             // No picture to show: the browser shows the alt text in its place.
             Inline::Figure(alt) => o.push_str(&format!("<img alt=\"{}\">", esc(alt))),
-            Inline::Equation { .. } => {}
+            // MathML, which browsers, Word and LibreOffice show as an equation (#816).
+            Inline::Equation { linear, display } => o.push_str(&crate::mathml::linear_to_mathml(linear, *display)),
         }
     }
     o
@@ -1448,6 +1702,15 @@ pub fn export(doc: &Document) -> String {
     export_flow(&flow, doc.styles.default_chr.lang.as_deref().unwrap_or("en"))
 }
 
+/// `doc`'s content as an HTML fragment (no head or style sheet): what a copy puts on the system
+/// clipboard beside its text, equations as MathML (#816).
+pub fn export_fragment(doc: &Document) -> String {
+    let flow = model::from_doc(doc);
+    let mut out = String::from("<meta charset=\"utf-8\">");
+    blocks_html(&flow.blocks, &mut out, 0);
+    out
+}
+
 pub fn export_flow(flow: &Flow, lang: &str) -> String {
     let m = &flow.meta;
     let mut out = String::new();
@@ -1585,8 +1848,97 @@ mod tests {
         assert!(p.text().ends_with("l\nn"));
     }
 
+    /// The paragraphs of every cell of the first table, row by row.
+    fn cell_paras(f: &Flow) -> Vec<Vec<Vec<Para>>> {
+        let Some(FBlock::Table(t)) = f.blocks.iter().find(|b| matches!(b, FBlock::Table(_))) else { panic!("no table") };
+        t.rows
+            .iter()
+            .map(|r| {
+                r.iter().map(|c| c.blocks.iter().filter_map(|b| if let FBlock::Para(p) = b { Some(p.clone()) } else { None }).collect()).collect()
+            })
+            .collect()
+    }
+
+    fn all_bold(p: &Para) -> bool {
+        !p.inlines.is_empty() && p.inlines.iter().all(|i| matches!(i, Inline::Text(_, f) if f.bold))
+    }
+
+    fn any_bold(p: &Para) -> bool {
+        p.inlines.iter().any(|i| matches!(i, Inline::Text(_, f) if f.bold))
+    }
+
+    #[test]
+    fn header_cells_are_bold_unless_their_css_says_otherwise() {
+        // #1381: a <th> is bold, as in browsers and Word; `font-weight:normal` on it or inside it wins.
+        let f = parse(
+            "<table><thead><tr><th>Head</th><th style='font-weight:normal'>Plain</th><th><span style='font-weight:400'>Inner</span></th></tr></thead><tbody><tr><td>a<td>b<td>c</tbody></table>",
+        );
+        let rows = cell_paras(&f);
+        assert!(all_bold(&rows[0][0][0]), "{:?}", rows[0][0]);
+        assert!(!any_bold(&rows[0][1][0]), "{:?}", rows[0][1]);
+        assert!(!any_bold(&rows[0][2][0]), "{:?}", rows[0][2]);
+        assert!(!any_bold(&rows[1][0][0]), "td stays regular");
+    }
+
+    #[test]
+    fn cell_text_align_reaches_the_cell_paragraphs() {
+        // #1381: `text-align` on a td/th, or inherited from its tr/thead/tbody/table, aligns the
+        // cell's paragraphs; a paragraph's own text-align inside the cell wins.
+        let f = parse(
+            "<table style='text-align:center'><tbody style='text-align:justify'><tr style='text-align:right'>\
+             <td style='text-align:right;'>r</td><td>inherited</td><td style='text-align:right'><p style='text-align:center'>own</p></td>\
+             <td align=right>attr</td></tr><tr><td>body</td></tr></tbody><tr><td>table</td></tr></table>",
+        );
+        let rows = cell_paras(&f);
+        assert_eq!(rows[0][0][0].align, Some(Align::Right), "td style");
+        assert_eq!(rows[0][1][0].align, Some(Align::Right), "from tr");
+        assert_eq!(rows[0][2][0].align, Some(Align::Center), "own paragraph wins");
+        assert_eq!(rows[0][3][0].align, Some(Align::Right), "align attribute");
+        assert_eq!(rows[1][0][0].align, Some(Align::Justify), "from tbody");
+        assert_eq!(rows[2][0][0].align, Some(Align::Center), "from table");
+        // `align` on a table places the table; it doesn't align the text in its cells.
+        let f = parse("<table align=center><tr><td>x</td></tr></table>");
+        assert_eq!(cell_paras(&f)[0][0][0].align, None);
+    }
+
+    #[test]
+    fn reporter_sample_header_bold_and_right_aligned_cells() {
+        // #1381: the reporter's table.
+        let f = parse(
+            "<table border=\"1\" style=\"width:100%;border-collapse:collapse;\">\n<thead><tr style=\"background-color:#e8f0fa;\"><th>Indicatore</th><th>Valore atteso</th></tr></thead>\n<tbody>\n<tr><td>Audit</td><td style=\"text-align:right;\">4</td></tr>\n</tbody></table>",
+        );
+        let rows = cell_paras(&f);
+        assert!(all_bold(&rows[0][0][0]) && all_bold(&rows[0][1][0]), "{:?}", rows[0]);
+        assert_eq!(rows[1][1][0].align, Some(Align::Right));
+        assert_eq!(rows[1][0][0].align, None);
+    }
+
     #[test]
     fn entities() {
         assert_eq!(unescape("a &lt;b&gt; &#65;&#x42; &bogus; &"), "a <b> AB &bogus; &");
+        assert_eq!(unescape("&minus; &COPY; &EURO; &TRADE; &frac12; &frac34;"), "− © € ™ ½ ¾");
+        assert_eq!(unescape("&theta; &lambda; &Delta; &nabla; &sum; &radic; &ne; &le; &ge; &hearts;"), "θ λ Δ ∇ ∑ √ ≠ ≤ ≥ ♥");
+    }
+
+    #[test]
+    fn wbr_word_break_opportunity() {
+        let f = parse("<p>Super<wbr>cali<wbr>fragilistic</p>");
+        let Some(FBlock::Para(p)) = f.blocks.first() else { panic!("expected para") };
+        assert_eq!(p.text(), "Super\u{200B}cali\u{200B}fragilistic");
+    }
+
+    #[test]
+    fn page_break_after_and_before() {
+        let f = parse("<p style='page-break-after: always'>First</p><p>Second</p>");
+        let paras: Vec<_> = f.blocks.iter().filter_map(|b| if let FBlock::Para(p) = b { Some(p) } else { None }).collect();
+        assert_eq!(paras.len(), 2);
+        assert!(!paras[0].page_break);
+        assert!(paras[1].page_break);
+
+        let f2 = parse("<div style='break-after: page'><p>Part 1</p></div><p>Part 2</p>");
+        let paras2: Vec<_> = f2.blocks.iter().filter_map(|b| if let FBlock::Para(p) = b { Some(p) } else { None }).collect();
+        assert_eq!(paras2.len(), 2);
+        assert!(!paras2[0].page_break);
+        assert!(paras2[1].page_break);
     }
 }

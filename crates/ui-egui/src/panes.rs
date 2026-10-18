@@ -127,6 +127,7 @@ fn nav(app: &mut WordApp, ui: &mut Ui) {
         out.state.store(ui.ctx(), r.id);
     }
     if r.changed() || picked.is_some() {
+        app.ui.nav_tab = "results".into();
         ui.data_mut(|d| d.insert_temp(qid, q.clone()));
         if !q.is_empty() {
             let _ = app.session.run("edit.find", &json!({"text": q}));
@@ -217,9 +218,12 @@ fn nav(app: &mut WordApp, ui: &mut Ui) {
 fn nav_heading(ui: &mut Ui, level: u8, text: &str, selected: bool) -> egui::Response {
     ui.horizontal(|ui| {
         ui.add_space(level as f32 * 14.0);
+        let label = egui::RichText::new(text).font(if level == 0 { semibold(12.5) } else { regular(12.5) });
         ui.add_sized(
             vec2(ui.available_width(), ui.spacing().interact_size.y),
-            egui::Button::selectable(selected, egui::RichText::new(text).font(if level == 0 { semibold(12.5) } else { regular(12.5) })).truncate(),
+            // The trailing grow atom takes the spare width, so the text starts flush left
+            // under its parent instead of centred, as in Word (#1199).
+            egui::Button::selectable(selected, (label, egui::Atom::grow())).truncate(),
         )
         .on_hover_text(text)
     })
@@ -240,6 +244,7 @@ fn clipboard(app: &mut WordApp, ui: &mut Ui) {
         }
         if ui.add_enabled(!items.is_empty(), egui::Button::new(tl!("Clear All"))).clicked() {
             let _ = app.run("edit.clearClipboard", json!({}));
+            app.canvas.want_focus = true;
         }
     });
     ui.add_space(4.0);
@@ -263,6 +268,7 @@ fn clipboard(app: &mut WordApp, ui: &mut Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if ui.small_button(tl!("Delete")).clicked() {
                         let _ = app.run("edit.deleteClipboardItem", json!({"index": i}));
+                        app.canvas.want_focus = true;
                     }
                 });
             });
@@ -332,10 +338,12 @@ fn styles(app: &mut WordApp, ui: &mut Ui) {
                     }
                     if ui.button(tl!("Update to Match Selection")).clicked() {
                         let _ = app.run("styles.updateToMatch", json!({"style": id}));
+                        app.canvas.want_focus = true;
                         ui.close();
                     }
                     if ui.button(tl!("Delete")).clicked() {
                         let _ = app.run("styles.delete", json!({"style": id}));
+                        app.canvas.want_focus = true;
                         ui.close();
                     }
                 });
@@ -735,6 +743,37 @@ mod tests {
         assert_eq!(comment_stamp("2026-10-12"), "2026-10-12");
         assert_eq!(comment_stamp(""), "");
     }
+
+    /// #1902: Clipboard Delete returns focus to the document like paste does.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clipboard_delete_returns_focus_to_the_document() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut app = crate::WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Hello")), crate::Services::default());
+        app.run("select.all", serde_json::json!({})).unwrap();
+        app.run("edit.copy", serde_json::json!({})).unwrap();
+        assert_eq!(app.session.clip_history.items().len(), 1);
+        app.run("edit.clipboardPane", serde_json::json!({"value": true})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut crate::WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(4);
+        // Focus the button for real: a bare accesskit click leaves egui focus empty, and an
+        // unrelated chrome-click helper would hand focus to the canvas on its own.
+        h.get_by_label("Delete").focus();
+        h.run_steps(2);
+        h.state_mut().canvas.want_focus = false;
+        h.get_by_label("Delete").click();
+        h.run_steps(4);
+        assert!(h.state().canvas.focused, "Delete returns focus to the document");
+        assert!(h.state().session.clip_history.items().is_empty(), "the item was deleted");
+    }
 }
 
 #[cfg(test)]
@@ -772,5 +811,33 @@ mod navigation_tests {
             );
             output.drop_without_applying_deltas();
         }
+    }
+
+    /// Word lists headings flush left, each level indented under its parent (#1199).
+    #[test]
+    fn headings_align_left_and_indent_by_level() {
+        let text_left = |level: u8| {
+            let ctx = egui::Context::default();
+            crate::theme::install_fonts(&ctx);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 600.0));
+            let mut panel_left = 0.0;
+            let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                let result = egui::Panel::left("navigation_test").default_size(260.0).show(ui, |ui| nav_heading(ui, level, "Kilns", false));
+                panel_left = result.response.rect.min.x;
+            });
+            let x = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "Kilns" => Some(t.pos.x + t.galley.rect.min.x),
+                    _ => None,
+                })
+                .unwrap();
+            output.drop_without_applying_deltas();
+            x - panel_left
+        };
+        let (top, second) = (text_left(0), text_left(1));
+        assert!(top < 30.0, "a top-level heading starts at the pane's left edge, not centred: {top}px in");
+        assert!((second - top - 14.0).abs() < 0.5, "a level-2 heading is indented 14px under its parent: {top} / {second}");
     }
 }

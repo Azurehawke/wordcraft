@@ -41,7 +41,7 @@ pub fn open_filters(purpose: &str) -> &'static [(&'static str, &'static [&'stati
     match purpose {
         "picture" => &[("Pictures", PICTURES)],
         "font" => &[("Fonts", wordcraft_fonts::FONT_FILE_EXTS)],
-        "recipients" => &[("Recipient lists", &["csv", "tsv", "txt", "xlsx", "xlsm", "ods"]), ("All files", &["*"])],
+        "recipients" => &[("Recipient lists", wordcraft_engine::cmd::mailings::RECIPIENT_EXTENSIONS), ("All files", &["*"])],
         _ => &[("Documents", DOCUMENTS), ("Word document", &["docx"]), ("All files", &["*"])],
     }
 }
@@ -221,7 +221,13 @@ impl WordApp {
             }
             AfterPick::Export { ext } => {
                 let Some(path) = picked else { return Ok(json!({"cancelled": true})) };
-                let r = if ext == "png" { self.run("file.exportPng", json!({"path": path})) } else { self.run("file.saveAs", json!({"path": path})) };
+                let r = if ext == "png" {
+                    self.run("file.exportPng", json!({"path": path}))
+                } else if ext == crate::print_page::EXPORT_WORD_2003 {
+                    self.run("file.saveAs", json!({"path": path, "format": ext}))
+                } else {
+                    self.run("file.saveAs", json!({"path": path}))
+                };
                 if r.is_ok() {
                     self.status(crate::i18n::fmt(tl!("Exported {path}"), &[("path", &path)]));
                 }
@@ -238,10 +244,9 @@ impl WordApp {
                 r
             }
             AfterPick::SaveAs(after) => {
-                let saved = picked.is_some_and(|path| {
-                    self.run("file.save", json!({"path": path}))
-                        .is_ok_and(|v| v.get("saved").and_then(Value::as_bool) == Some(true) || v.get("downloaded").is_some())
-                });
+                // The save's error, kept for the Save Changes prompt to explain (#1445).
+                let result = picked.map(|path| self.run("file.save", json!({"path": path})));
+                let saved = matches!(&result, Some(Ok(v)) if v.get("saved").and_then(Value::as_bool) == Some(true) || v.get("downloaded").is_some());
                 if saved {
                     self.ui.backstage = false;
                     self.canvas.want_focus = true;
@@ -255,6 +260,9 @@ impl WordApp {
                         Ok(json!({"saved": saved}))
                     }
                     AfterSave::Continue { then, params, document } => {
+                        if let Some(Err(error)) = result {
+                            return Err(self.save_failed(&error, then, params, document));
+                        }
                         if !self.safely_saved(saved) || document != self.session.document_id() {
                             return Ok(json!({"done": false}));
                         }
@@ -278,7 +286,8 @@ impl WordApp {
 
     /// File › Export: ask where to save a copy in this format, then write it.
     pub(crate) fn export_dialog(&mut self, ext: &str) {
-        let name = format!("{}.{ext}", self.title_stem());
+        let file_ext = if ext == crate::print_page::EXPORT_WORD_2003 { "xml" } else { ext };
+        let name = format!("{}.{file_ext}", self.title_stem());
         let _ = self.ask_file(FileDialogRequest::Save { name }, AfterPick::Export { ext: ext.to_string() });
     }
 
@@ -313,6 +322,15 @@ impl WordApp {
             return;
         }
         let _ = self.ask_file(FileDialogRequest::Open { purpose: "font".into() }, AfterPick::Font);
+    }
+
+    /// Request loading local system installed fonts (web: queryLocalFonts).
+    pub(crate) fn load_system_fonts(&mut self) {
+        if let Some(f) = &self.services.load_system_fonts {
+            f();
+        } else {
+            self.status(tl!("All system fonts are already available."));
+        }
     }
 }
 
@@ -441,6 +459,60 @@ mod tests {
         assert_eq!(shown.borrow()[0].0, FileDialogRequest::Open { purpose: "document".into() });
     }
 
+    /// #2313: Export PDF from the command search (no path given) asks where to save it, as the
+    /// Backstage's Export button does, instead of failing with "bad parameters: `path` (string)
+    /// is required" on the status bar.
+    #[test]
+    fn export_pdf_without_a_path_asks_where_to_save() {
+        let (mut a, shown) = async_app();
+        let r = a.run("file.exportPdf", json!({})).unwrap();
+        assert_eq!(r, json!({"exported": false}));
+        assert_eq!(shown.borrow()[0].0, FileDialogRequest::Save { name: format!("{}.pdf", a.title_stem()) });
+        let dir = scratch("export-pdf");
+        let picked = dir.join("out.pdf");
+        answer(&shown, Some(&picked.to_string_lossy()));
+        let r = a.poll_file_dialog().unwrap().unwrap();
+        assert_eq!(r["path"], json!(picked.to_string_lossy().to_string()));
+        let bytes = std::fs::read(&picked).unwrap();
+        assert!(bytes.starts_with(b"%PDF"), "a PDF is written to the picked path");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Open, Save As and Export PNG from the command search (no path) ask for a file the same way.
+    #[test]
+    fn file_commands_without_a_path_ask_for_one() {
+        let (mut a, shown) = async_app();
+        a.run("file.open", json!({})).unwrap();
+        assert_eq!(shown.borrow()[0].0, FileDialogRequest::Open { purpose: "document".into() });
+        // A second dialog can't open while one is up, so cancel before the next command.
+        answer(&shown, None);
+        a.poll_file_dialog();
+        a.run("file.saveAs", json!({})).unwrap();
+        assert!(matches!(shown.borrow()[0].0, FileDialogRequest::Save { .. }));
+        answer(&shown, None);
+        a.poll_file_dialog();
+        a.run("file.exportPng", json!({})).unwrap();
+        assert!(matches!(shown.borrow()[0].0, FileDialogRequest::Save { ref name } if name.ends_with(".png")));
+    }
+
+    /// #1445: "Save changes?" → Save on a new document while another file dialog is still open:
+    /// nothing can be asked, so nothing happens, and the status bar says why.
+    #[test]
+    fn save_changes_while_a_file_dialog_is_open_says_so() {
+        let (mut a, shown) = async_app();
+        typed(&mut a);
+        a.open_dialog();
+        assert_eq!(shown.borrow().len(), 1);
+        a.run("file.close", json!({})).unwrap();
+        a.status_msg = None;
+        let r = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap();
+        assert_eq!(r["done"], false);
+        assert!(!a.quit_requested);
+        assert!(a.session.dirty && body_text(&a).contains(UNSAVED));
+        let msg = a.status_msg.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+        assert!(msg.contains("file dialog is already open"), "the status bar says why: {msg:?}");
+    }
+
     /// "Save changes?" → Save on a new document: the held-back Close runs only once the later
     /// Save As has actually saved; a cancelled Save As cancels the held-back New.
     #[test]
@@ -534,5 +606,23 @@ mod tests {
         assert_eq!(a.session.merge.headers, vec!["Name"]);
         assert_eq!(a.session.merge.rows.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_system_fonts_runs_hook_when_present() {
+        use std::cell::Cell;
+        let called = Rc::new(Cell::new(false));
+        let called2 = called.clone();
+        let services = Services { load_system_fonts: Some(Box::new(move || called2.set(true))), ..Default::default() };
+        let mut a = WordApp::new(Session::new(wordcraft_doc::Document::new()), services);
+        a.run("font.loadSystem", json!({})).unwrap();
+        assert!(called.get());
+    }
+
+    #[test]
+    fn load_system_fonts_without_hook_reports_status() {
+        let mut a = WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default());
+        a.run("font.loadSystem", json!({})).unwrap();
+        assert_eq!(a.status_msg.as_ref().map(|(s, _)| s.as_str()), Some("All system fonts are already available."));
     }
 }
