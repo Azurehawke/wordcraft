@@ -78,9 +78,14 @@ public class WordCraftActivity extends NativeActivity {
         return info.getLongVersionCode();
     }
 
-    private HttpURLConnection open(String url) throws IOException {
+    /** Send a GET for `url` (with `accept` as its Accept header when not null) and check its status. */
+    private HttpURLConnection open(String url, String accept) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        // Headers go before the request is sent: getResponseCode() below sends it.
         c.setRequestProperty("User-Agent", USER_AGENT);
+        if (accept != null) {
+            c.setRequestProperty("Accept", accept);
+        }
         c.setConnectTimeout(15000);
         c.setReadTimeout(30000);
         c.setInstanceFollowRedirects(true);
@@ -94,8 +99,7 @@ public class WordCraftActivity extends NativeActivity {
 
     /** GET `url` as text (the GitHub release listing). Blocking: call off the UI thread. */
     public String wcHttpGet(String url) throws IOException {
-        HttpURLConnection c = open(url);
-        c.setRequestProperty("Accept", "application/vnd.github+json");
+        HttpURLConnection c = open(url, "application/vnd.github+json");
         try (InputStream in = c.getInputStream()) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buf = new byte[16384];
@@ -121,7 +125,7 @@ public class WordCraftActivity extends NativeActivity {
         downloaded = 0;
         downloadTotal = 0;
         File tmp = new File(getCacheDir(), "update.apk.part");
-        HttpURLConnection c = open(url);
+        HttpURLConnection c = open(url, null);
         downloadTotal = Math.max(0, c.getContentLengthLong());
         try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(tmp)) {
             byte[] buf = new byte[65536];

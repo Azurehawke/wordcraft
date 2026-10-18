@@ -28,6 +28,8 @@ const REPOSITORY: &str = match option_env!("GITHUB_REPOSITORY") {
 const TAG: &str = "android-latest";
 /// Check again after this long (seconds) when the app comes back to the front.
 const RECHECK: f64 = 3600.0;
+/// After a check that failed (offline, GitHub busy), try again this much sooner (seconds).
+const RETRY_AFTER_FAILURE: f64 = 300.0;
 
 /// A newer build on GitHub.
 #[derive(Clone, Debug, PartialEq)]
@@ -193,7 +195,9 @@ impl Updater {
                 }
                 Ok(Err(e)) => {
                     // A failed background check stays quiet: offline is normal.
-                    log::info!("updates: check failed: {e}");
+                    log::warn!("updates: check failed: {e}");
+                    // Try again in a few minutes rather than an hour.
+                    self.last_check = self.last_check.map(|t| t - RECHECK + RETRY_AFTER_FAILURE);
                     self.state = State::Idle;
                 }
             },
