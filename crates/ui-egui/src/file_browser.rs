@@ -509,7 +509,7 @@ fn storage_bar(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens, storage: &StorageAc
                 "To open and save documents in your folders, allow WordCraft to manage all files. Without it, WordCraft can only use its own app folder."
             )).color(t.text));
             ui.add_space(4.0);
-            if ui.add(egui::Button::new(egui::RichText::new(tl!("Allow access…")).color(egui::Color32::WHITE)).fill(APP_COLOR)).clicked() {
+            if ui.add(crate::widgets::primary_button(ui, tl!("Allow access…"))).clicked() {
                 b.access_error = (storage.request)().err();
             }
             if let Some(e) = &b.access_error {
