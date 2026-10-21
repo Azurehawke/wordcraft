@@ -683,21 +683,37 @@ pub fn stem_darkening(ppem: f64) -> f64 {
     FACTOR.iter().map(|f| (ppem * f).min(MAX_PX)).sum::<f64>() / 2.0
 }
 
-/// A wavy line from `a` to `b` at height `y`; at most 20 000 units long, so a huge extent can't make it endless.
-fn wave_path(a: f64, b: f64, y: f64, amp: f64) -> BezPath {
-    let step = amp * 2.0;
+/// A wavy line from `(x0, y0)` to `(x1, y1)`; at most 20 000 units long, so a huge extent can't make it endless.
+fn wave_path(x0: f64, y0: f64, x1: f64, y1: f64, amp: f64) -> BezPath {
     let mut p = BezPath::new();
-    p.move_to((a, y));
-    let mut x = a;
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len = (dx * dx + dy * dy).sqrt();
+    if !len.is_finite() || len < 1e-3 {
+        return p;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let (nx, ny) = (-uy, ux);
+    let step = amp * 2.0;
+    p.move_to((x0, y0));
+    // Past about 1e16 a step no longer changes coordinates: stop instead of pushing curves forever.
+    if x0 + ux * step == x0 && y0 + uy * step == y0 {
+        return p;
+    }
+    let mut t = 0.0;
     let mut up = true;
-    while x < b && x - a < 20_000.0 {
-        let nx = (x + step).min(b);
-        // Past about 1e16 a step no longer changes `x`: stop instead of pushing curves forever.
-        if nx <= x {
+    while t < len && t < 20_000.0 {
+        let nt = (t + step).min(len);
+        if nt <= t {
             break;
         }
-        p.quad_to(((x + nx) / 2.0, if up { y - amp } else { y + amp }), (nx, y));
-        x = nx;
+        let mid_t = (t + nt) / 2.0;
+        let sign = if up { -1.0 } else { 1.0 };
+        let cx = x0 + ux * mid_t + nx * amp * sign;
+        let cy = y0 + uy * mid_t + ny * amp * sign;
+        let ex = x0 + ux * nt;
+        let ey = y0 + uy * nt;
+        p.quad_to((cx, cy), (ex, ey));
+        t = nt;
         up = !up;
     }
     p
@@ -723,34 +739,40 @@ fn draw(ctx: &mut RenderContext, doc: &Document, it: &Draw, view: Affine, visibl
             ctx.set_transform(view);
             ctx.set_paint(color(opts.ink_text(*c, *text_bg), *alpha));
             let w = *width as f64;
-            let mut st = kurbo::Stroke::new(w);
+            // Flat ends, like the PDF export and Word: a round cap sticks half the width out past
+            // every end, blobbing over the neighbouring border at a table's corners (#2892). Wavy
+            // underlines keep round ends, as the PDF draws them.
+            let mut st = kurbo::Stroke::new(w).with_caps(kurbo::Cap::Butt);
             match stroke {
                 Stroke::Dotted => st = st.with_dashes(0.0, [w, w * 2.0]),
                 Stroke::Dashed => st = st.with_dashes(0.0, [w * 4.0, w * 2.0]),
                 _ => {}
             }
-            let line = |ctx: &mut RenderContext, dy: f64| {
+            let (x0, y0, x1, y1) = (*x0 as f64, *y0 as f64, *x1 as f64, *y1 as f64);
+            let line = |ctx: &mut RenderContext, ox: f64, oy: f64| {
                 let mut p = BezPath::new();
-                p.move_to((*x0 as f64, *y0 as f64 + dy));
-                p.line_to((*x1 as f64, *y1 as f64 + dy));
+                p.move_to((x0 + ox, y0 + oy));
+                p.line_to((x1 + ox, y1 + oy));
                 ctx.stroke_path(&p);
             };
             if *stroke == Stroke::Wave {
-                let (a, b) = ((*x0).min(*x1) as f64, (*x0).max(*x1) as f64);
                 let amp = (w * 1.2).max(0.8);
-                let p = wave_path(a, b, *y0 as f64, amp);
+                let p = wave_path(x0, y0, x1, y1, amp);
                 ctx.set_stroke(kurbo::Stroke::new(w * 0.8));
                 ctx.stroke_path(&p);
                 return;
             }
             if *stroke == Stroke::Double {
-                ctx.set_stroke(kurbo::Stroke::new(w * 0.6));
-                line(ctx, -w * 0.9);
-                line(ctx, w * 0.9);
+                let (dx, dy) = (x1 - x0, y1 - y0);
+                let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+                let (nx, ny) = (-dy / len * w * 0.9, dx / len * w * 0.9);
+                ctx.set_stroke(kurbo::Stroke::new(w * 0.6).with_caps(kurbo::Cap::Butt));
+                line(ctx, nx, ny);
+                line(ctx, -nx, -ny);
                 return;
             }
             ctx.set_stroke(st);
-            line(ctx, 0.0);
+            line(ctx, 0.0, 0.0);
         }
         Draw::Glyphs { face, size, glyphs, color: c, alpha, synth_bold, synth_italic, text_bg, .. } => {
             // Invisible glyphs (WordArt letters are drawn from their outlines) carry text only.
@@ -1512,6 +1534,26 @@ mod tests {
         assert!(!img.to_png().is_empty());
     }
 
+    /// #2892: a rule is stroked with flat ends, as the PDF export and Word draw them. Round caps
+    /// used to stick half the width out past every end — a blob over the neighbouring border at
+    /// each corner of a table with thick borders, while the exported PDF had square corners.
+    #[test]
+    fn a_thick_rule_ends_flat_not_round() {
+        let d = Document::new();
+        let rule = |stroke| Draw::Line { x0: 10.0, y0: 10.0, x1: 30.0, y1: 10.0, width: 8.0, color: Rgb::BLACK, stroke, alpha: 1.0, text_bg: None };
+        let shot = |stroke| render_items(&d, &[rule(stroke)], 0.0, 0.0, 40.0, 20.0, 1.0, &RenderOptions::default());
+        let ink = |img: &Rendered, x: u32, y: u32| img.pixel(x, y)[3] > 128;
+        // An 8 pt rule from x=10 to x=30 covers y 6..14, and nothing beyond either end.
+        let img = shot(Stroke::Solid);
+        assert!(ink(&img, 15, 10), "the rule itself is drawn");
+        assert!(!ink(&img, 6, 10) && !ink(&img, 33, 10), "no round cap past x=10 or x=30");
+        // The double style's two strands end flat as well: its upper strand is centred on y=2.8
+        // with a 4.8 pt width, so x=31 lies in the half-disc a round cap would add.
+        let img = shot(Stroke::Double);
+        assert!(ink(&img, 15, 3), "the double rule's upper strand is drawn");
+        assert!(!ink(&img, 31, 3), "the upper strand ends at x=30");
+    }
+
     #[test]
     fn dark_page_inverts_lightness() {
         assert_eq!(invert_lightness(Rgb::WHITE), Rgb::BLACK);
@@ -1545,9 +1587,11 @@ mod tests {
             let (mut dark, mut grey) = ((0.0, 0.0, 0.0f64), (0.0, 0.0, 0.0f64));
             for (x, y) in (100..800).flat_map(|x| (100..300).map(move |y| (x, y))) {
                 let v = img.pixel(x, y)[0];
+                // The copy is solid RGB 128; a wider range would count the glyph's own
+                // antialiasing, whose centroid hides the copy's offset on some fonts.
                 let acc = match v {
                     0..60 => &mut dark,
-                    100..=160 => &mut grey,
+                    120..=136 => &mut grey,
                     _ => continue,
                 };
                 *acc = (acc.0 + 1.0, acc.1 + f64::from(x), acc.2 + f64::from(y));
