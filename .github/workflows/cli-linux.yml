@@ -1,0 +1,64 @@
+name: Linux CLI (MCP server)
+
+# Builds wordcraft-cli for x86-64 Linux, the binary the MCP bridge on a home server runs
+# (`wordcraft-cli mcp`; docs/mcp-bridge.md), and publishes it as the `cli-linux-latest`
+# prerelease. Built on Ubuntu 22.04 so it runs on that and newer glibc systems (Debian 12+,
+# Ubuntu 22.04+, Fedora, Arch...).
+on:
+  push:
+    branches: [android]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cli:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cli-linux-x86_64
+
+      - name: Build wordcraft-cli
+        run: cargo build --release --locked -p wordcraft-cli
+
+      - name: MCP server tests
+        run: cargo test --release --locked -p wordcraft-mcp
+
+      - name: Package
+        run: |
+          mkdir -p dist/wordcraft-cli
+          cp target/release/wordcraft-cli dist/wordcraft-cli/
+          cp docs/mcp.md docs/mcp-bridge.md dist/wordcraft-cli/ 2>/dev/null || true
+          cp -r packaging/mcp-bridge dist/wordcraft-cli/bridge
+          tar -C dist -czf wordcraft-cli-x86_64-linux.tar.gz wordcraft-cli
+          ./target/release/wordcraft-cli --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordcraft-cli-x86_64-linux
+          path: wordcraft-cli-x86_64-linux.tar.gz
+
+      - name: Publish as the cli-linux-latest prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete cli-linux-latest --yes --cleanup-tag || true
+          gh release create cli-linux-latest wordcraft-cli-x86_64-linux.tar.gz \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "wordcraft-cli for Linux x86-64 (build ${{ github.run_number }})" \
+            --notes "wordcraft-cli for the MCP bridge on a Linux server, built from ${GITHUB_SHA::7}. See docs/mcp-bridge.md."

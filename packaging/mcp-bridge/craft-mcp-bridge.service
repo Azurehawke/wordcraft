@@ -1,0 +1,21 @@
+# systemd service for the Craft MCP bridge (GridCraft at /mcp, WordCraft at /word/mcp).
+#   sudo cp craft-mcp-bridge.service /etc/systemd/system/
+#   sudo cp craft-mcp-bridge.env /etc/craft-mcp-bridge.env   (then edit the paths)
+#   sudo systemctl daemon-reload && sudo systemctl enable --now craft-mcp-bridge
+# Logs: journalctl -u craft-mcp-bridge -f
+[Unit]
+Description=Craft MCP bridge (GridCraft and WordCraft over HTTP)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+# The user that owns your documents (so saved files belong to you): change to yours.
+User=steve
+EnvironmentFile=/etc/craft-mcp-bridge.env
+ExecStart=/usr/bin/python3 /opt/craft-mcp-bridge/craft_mcp_bridge.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
