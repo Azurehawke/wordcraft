@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Craft MCP HTTP bridge: GridCraft (Excel) and WordCraft (Word) for Gemini Scribe and other MCP
+"""Craft MCP HTTP bridge: GridCraft (Excel), WordCraft (Word) and PdfCraft (PDF) for Gemini Scribe and other MCP
 clients, over MCP's Streamable HTTP transport.
 
 Each Craft app has an MCP server that speaks JSON-RPC over stdio (`gridcraft-cli mcp`,
-`wordcraft-cli mcp`). This bridge serves them over HTTP, one endpoint per app:
+`wordcraft-cli mcp`, `pdfcraft-cli mcp`). This bridge serves them over HTTP, one endpoint per app:
 
     http://HOST:PORT/mcp        GridCraft (spreadsheets: .xlsx, .csv ...)  - unchanged
     http://HOST:PORT/word/mcp   WordCraft (documents: .docx, .odt, .rtf, .md, PDF export ...)
+    http://HOST:PORT/pdf/mcp    PdfCraft (PDFs: read, comment, fill forms, organize pages, OCR ...)
 
 Every MCP session (each client connection, identified by the Mcp-Session-Id header) gets its own
 app process, so two clients never edit each other's open document. Sessions idle for
@@ -22,10 +23,14 @@ Settings (environment variables; the defaults are in the CONFIG section below):
                                           files inside it. Leave empty for no confinement (relative
                                           paths then resolve against the bridge's folder).
     WORDCRAFT_AUTHOR                      name on WordCraft's tracked changes and comments
+    PDFCRAFT_BINARY                       path to pdfcraft-cli (keep its models/ folder beside it
+                                          for OCR)
+    PDFCRAFT_DOCS                         folder PdfCraft works in, like WORDCRAFT_DOCS (defaults
+                                          to WORDCRAFT_DOCS)
     CRAFT_MCP_TIMEOUT                     seconds to wait for an app's reply (default 120)
     CRAFT_MCP_IDLE_MINUTES                close sessions unused this long (default 30)
 
-An endpoint whose app is missing answers 503 with the reason; the other keeps working.
+An endpoint whose app is missing answers 503 with the reason; the others keep working.
 """
 
 import json
@@ -55,6 +60,8 @@ GRIDCRAFT_BINARY = os.environ.get("GRIDCRAFT_BINARY", "/opt/gridcraft/bin/gridcr
 WORDCRAFT_BINARY = os.environ.get("WORDCRAFT_BINARY", "/opt/wordcraft/bin/wordcraft-cli")
 WORDCRAFT_DOCS = os.environ.get("WORDCRAFT_DOCS", "")
 WORDCRAFT_AUTHOR = os.environ.get("WORDCRAFT_AUTHOR", "Gemini (Obsidian)")
+PDFCRAFT_BINARY = os.environ.get("PDFCRAFT_BINARY", "/opt/pdfcraft/bin/pdfcraft-cli")
+PDFCRAFT_DOCS = os.environ.get("PDFCRAFT_DOCS", WORDCRAFT_DOCS)
 
 
 class Backend:
@@ -88,10 +95,19 @@ def wordcraft_args():
     return args
 
 
+def pdfcraft_args():
+    args = ["mcp"]
+    if PDFCRAFT_DOCS:
+        # Every path a tool reads or writes stays inside the documents folder.
+        args += ["--root", PDFCRAFT_DOCS]
+    return args
+
+
 # Endpoint path -> app. "/mcp" stays GridCraft so existing client settings keep working.
 BACKENDS = {
     "/mcp": Backend("GridCraft", GRIDCRAFT_BINARY, ["mcp"]),
     "/word/mcp": Backend("WordCraft", WORDCRAFT_BINARY, wordcraft_args(), cwd=WORDCRAFT_DOCS),
+    "/pdf/mcp": Backend("PdfCraft", PDFCRAFT_BINARY, pdfcraft_args(), cwd=PDFCRAFT_DOCS),
 }
 
 # ---------------------------------------------------------------------------------------------
