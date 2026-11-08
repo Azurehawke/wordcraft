@@ -155,7 +155,7 @@ fn services(requests: &TabRequests) -> Services {
         storage: Some(StorageAccess { granted: Box::new(file_access::granted), request: Box::new(file_access::request), places: Box::new(places) }),
         clipboard_text: Some(Box::new(clipboard::text)),
         clipboard_html: Some(Box::new(clipboard::html)),
-        set_clipboard_html: Some(Box::new(|html, text, _mathml| clipboard::set_html(html, text))),
+        set_clipboard_rich: Some(Box::new(|text, html, _rtf, _mathml| clipboard::set_html(html, text))),
         // Personal templates (File › New, Save as Word Template), in the settings folder as on the desktop.
         templates_dir: wordcraft_control_key::settings_dir().map(|d| d.join("Templates")),
         ..Default::default()
