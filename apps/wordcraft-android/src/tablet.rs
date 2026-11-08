@@ -26,7 +26,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2};
+use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2};
 use serde_json::json;
 use winit::platform::android::activity::AndroidApp;
 use wordcraft_ui_egui::WordApp;
@@ -390,7 +390,7 @@ impl eframe::App for TabletApp {
             let next = (self.active as i64 + step).rem_euclid(n);
             self.switch_to(usize::try_from(next).unwrap_or(0));
         }
-        self.app().raw_input_hook(raw);
+        self.app().raw_input_hook(ctx, raw);
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -592,7 +592,8 @@ impl TouchRouter {
     }
 
     fn wheel(&self, out: &mut Vec<Event>, delta: Vec2, phase: TouchPhase) {
-        out.push(Event::MouseWheel { unit: MouseWheelUnit::Point, delta, phase, modifiers: self.modifiers });
+        // Two fingers on a touch surface (or a touchpad's gesture): a trackpad's scroll, not a wheel's.
+        out.push(Event::MouseWheel { unit: MouseWheelUnit::Point, delta, phase, modifiers: self.modifiers, source: MouseWheelSource::Trackpad });
     }
 
     /// A click of `button` at `pos`: the press now, the release next frame (or now, when the
