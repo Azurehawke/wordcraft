@@ -1,0 +1,65 @@
+== libwordcraft_android.so
+warning: Environment variable `ANDROID_NDK_HOME = "/usr/local/lib/android/sdk/ndk/30.0.16248370"` doesn't match `ANDROID_NDK_ROOT = "/usr/local/lib/android/sdk/ndk/27.3.13750724"`
+    Building arm64-v8a (aarch64-linux-android)
+[1m[33mwarning[0m: patch `egui_demo_lib v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+[1m[33mwarning[0m: patch `egui_inspection v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+[1m[33mwarning[0m: patch `egui_system_font_provider v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+[1m[96mhelp[0m: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+[1m[92m   Compiling[0m wordcraft-geom v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/geom)
+[1m[92m   Compiling[0m wordcraft-fonts v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/fonts)
+[1m[92m   Compiling[0m wordcraft-metafile v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/metafile)
+[1m[92m   Compiling[0m winit v0.30.13 (/home/runner/work/wordcraft/wordcraft/vendor/winit)
+[1m[92m   Compiling[0m wordcraft-doc v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/doc)
+[1m[92m   Compiling[0m wordcraft-ui-egui v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/ui-egui)
+[1m[92m   Compiling[0m egui-wgpu v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+[1m[92m   Compiling[0m egui-winit v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+[1m[92m   Compiling[0m eframe v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+[1m[92m   Compiling[0m wordcraft-control-key v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/control-key)
+[1m[92m   Compiling[0m wordcraft-layout v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/layout)
+[1m[92m   Compiling[0m wordcraft-docx v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/docx)
+[1m[92m   Compiling[0m wordcraft-render v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/render)
+[1m[92m   Compiling[0m wordcraft-pdf v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/pdf)
+[1m[92m   Compiling[0m wordcraft-docbin v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/docbin)
+[1m[92m   Compiling[0m wordcraft-formats v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/formats)
+[1m[92m   Compiling[0m wordcraft-engine v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/engine)
+[1m[92m   Compiling[0m wordcraft-zotero v0.15.1 (/home/runner/work/wordcraft/wordcraft/crates/zotero)
+[1m[92m   Compiling[0m wordcraft-android v0.15.1 (/home/runner/work/wordcraft/wordcraft/apps/wordcraft-android)
+[1m[33mwarning[0m[1m: use of deprecated method `egui::Ui::id`: Renamed to `Ui::scope_id`[0m
+   [1m[94m--> [0mapps/wordcraft-android/src/tablet.rs:227:44
+    [1m[94m|[0m
+[1m[94m227[0m [1m[94m|[0m             let resp = ui.interact(tab, ui.id().with(("doc_tab", i)), egui::Sense::click());
+    [1m[94m|[0m                                            [1m[33m^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(deprecated)]` on by default
+
+[1m[33mwarning[0m[1m: use of deprecated method `egui::Ui::id`: Renamed to `Ui::scope_id`[0m
+   [1m[94m--> [0mapps/wordcraft-android/src/tablet.rs:237:48
+    [1m[94m|[0m
+[1m[94m237[0m [1m[94m|[0m             let x_resp = ui.interact(x_btn, ui.id().with(("doc_tab_close", i)), egui::Sense::click());
+    [1m[94m|[0m                                                [1m[33m^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated method `egui::Ui::id`: Renamed to `Ui::scope_id`[0m
+   [1m[94m--> [0mapps/wordcraft-android/src/tablet.rs:265:46
+    [1m[94m|[0m
+[1m[94m265[0m [1m[94m|[0m         let plus_resp = ui.interact(plus, ui.id().with("doc_tab_new"), egui::Sense::click()).on_hover_text("New document");
+    [1m[94m|[0m                                              [1m[33m^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated associated function `egui::Id::new`: Use `Id::unique` (for a globally unique id) or `IdSalt::new` (for a locally unique salt) instead[0m
+   [1m[94m--> [0mapps/wordcraft-android/src/updater.rs:244:35
+    [1m[94m|[0m
+[1m[94m244[0m [1m[94m|[0m         egui::Area::new(egui::Id::new("wordcraft_android_update"))
+    [1m[94m|[0m                                   [1m[33m^^^[0m
+
+[1m[33mwarning[0m: `wordcraft-android` (lib) generated 4 warnings
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 3m 02s
+     Copying libraries to /home/runner/work/wordcraft/wordcraft/target/android-apk/jniLibs
+== resources and manifest
+== activity class
+Note: /home/runner/work/wordcraft/wordcraft/packaging/android/java/ai/storyteller/wordcraft/WordCraftActivity.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+== native library
+== align and sign
+-rw-r--r-- 1 runner runner 30335593 Nov 11 03:32 /home/runner/work/wordcraft/wordcraft/target/android-apk/wordcraft.apk
