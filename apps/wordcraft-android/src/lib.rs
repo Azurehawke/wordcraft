@@ -110,6 +110,38 @@ fn load_user_files() {
     }
 }
 
+/// The removable volumes (SD cards, USB drives) that are mounted now, each as its folder. Android
+/// doesn't always list them under `/storage`, so the mount table is read as well.
+fn removable_volumes() -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir("/storage")
+        .map(|entries| entries.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    if let Ok(mounts) = std::fs::read_to_string("/proc/mounts") {
+        found.extend(mounted_volumes(&mounts));
+    }
+    found.retain(|p| {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        name != "emulated" && name != "self" && !name.is_empty() && p.is_dir()
+    });
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// The folders under `/storage` or `/mnt/media_rw` in a mount table (`/proc/mounts`), one per
+/// line: `device mountpoint fstype …`. Mount points escape spaces and tabs as octal (`\040`).
+fn mounted_volumes(mounts: &str) -> Vec<PathBuf> {
+    mounts
+        .lines()
+        .filter_map(|line| {
+            let mount = line.split_whitespace().nth(1)?.replace("\\040", " ").replace("\\011", "\t");
+            let path = PathBuf::from(mount);
+            let parent = path.parent()?;
+            (parent == std::path::Path::new("/storage") || parent == std::path::Path::new("/mnt/media_rw")).then_some(path)
+        })
+        .collect()
+}
+
 /// The file browser's shortcuts: the device's storage and its usual folders, SD cards and USB
 /// drives that are plugged in, and WordCraft's own folder.
 fn places() -> Vec<(String, PathBuf)> {
@@ -118,21 +150,9 @@ fn places() -> Vec<(String, PathBuf)> {
         ("Documents".to_string(), PathBuf::from(SHARED).join("Documents")),
         ("Download".to_string(), PathBuf::from(SHARED).join("Download")),
     ];
-    if let Ok(entries) = std::fs::read_dir("/storage") {
-        let mut volumes: Vec<PathBuf> = entries
-            .flatten()
-            .filter(|e| {
-                let name = e.file_name();
-                let name = name.to_string_lossy();
-                name != "emulated" && name != "self" && e.path().is_dir()
-            })
-            .map(|e| e.path())
-            .collect();
-        volumes.sort();
-        for v in volumes {
-            let name = v.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            out.push((format!("SD card or USB drive ({name})"), v));
-        }
+    for v in removable_volumes() {
+        let name = v.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        out.push((format!("SD card or USB drive ({name})"), v));
     }
     if let Some(dir) = app_dir() {
         out.push(("App folder".to_string(), dir));
@@ -239,5 +259,37 @@ fn android_main(android: AndroidApp) {
     );
     if let Err(e) = result {
         log::error!("WordCraft stopped: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mounted_volumes;
+    use std::path::PathBuf;
+
+    #[test]
+    fn removable_volumes_come_from_the_mount_table() {
+        let mounts = "\
+/dev/block/vold/public:8,1 /storage/1A2B-3C4D vfat rw,nosuid 0 0
+/dev/fuse /storage/emulated fuse rw 0 0
+/dev/block/dm-0 /data ext4 rw 0 0
+/dev/block/vold/public:8,2 /storage/My\\040Card exfat rw 0 0
+/dev/block/vold/public:8,3 /mnt/media_rw/ABCD-1234 vfat rw 0 0
+/dev/block/vold/public:8,4 /storage/1A2B-3C4D/Sub vfat rw 0 0
+";
+        assert_eq!(
+            mounted_volumes(mounts),
+            vec![
+                PathBuf::from("/storage/1A2B-3C4D"),
+                PathBuf::from("/storage/emulated"),
+                PathBuf::from("/storage/My Card"),
+                PathBuf::from("/mnt/media_rw/ABCD-1234"),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_mount_table_has_no_volumes() {
+        assert!(mounted_volumes("").is_empty());
     }
 }
